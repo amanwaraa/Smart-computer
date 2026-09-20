@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadProfessionalPurchaseInvoicePDF, downloadProfessionalPurchaseInvoiceImage, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.41-smart-stock-stable-2';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
+import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
+import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadProfessionalPurchaseInvoicePDF, downloadProfessionalPurchaseInvoiceImage, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
 import { Plus, Trash2, Building2, Eye, X, Image as ImageIcon, FileDown, FileSpreadsheet, Printer, AlertTriangle, ReceiptText } from 'lucide-react';
 
 const h = React.createElement;

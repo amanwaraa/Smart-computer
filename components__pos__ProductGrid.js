@@ -1,5 +1,5 @@
 import React from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
 import { Package, Layers } from 'lucide-react';
 
 const h = React.createElement;

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { smartPrinter } from './services__printer.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
+import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
+import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.41-smart-stock-stable-2';
+import { smartPrinter } from './services__printer.js?v=7.9.4.41-smart-stock-stable-2';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
 import { Printer, X, Download, Image as ImageIcon, FileSpreadsheet, Bluetooth, MessageCircle, MessageSquare } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 

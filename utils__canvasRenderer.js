@@ -1,5 +1,5 @@
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { code128Geometry } from './utils__code128.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
+import { code128Geometry } from './utils__code128.js?v=7.9.4.41-smart-stock-stable-2';
 
 const imageCache = new Map();
 const num = v => { const n=Number(v); return Number.isFinite(n)?n:0; };

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
 import { X, Bell, CreditCard, PackageX, History, CalendarClock, Truck, AlertTriangle } from 'lucide-react';
 
 const h = React.createElement;

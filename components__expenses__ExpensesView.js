@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadProfessionalTablePDF, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.41-smart-stock-stable-2';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadProfessionalTablePDF, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
 import { Plus, Search, Trash2, Edit2, FileSpreadsheet, FileText, Settings2, UsersRound, Receipt, WalletCards, X } from 'lucide-react';
 
 const h = React.createElement;

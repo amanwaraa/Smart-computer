@@ -1,12 +1,12 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useRef } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { exportToCSV, printReceiptElement } from './utils__export.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.41-smart-stock-stable-2';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
+import { exportToCSV, printReceiptElement } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
 import { Plus, Search, FileText, DollarSign, Download, Printer, Trash2, X, Edit, Image as ImageIcon, FileSpreadsheet, } from 'lucide-react';
 export const SuppliersView = () => {
     const { suppliers, purchases, accounts, settings, saveSupplier, softDeleteSupplier, recordSupplierPayment, showToast, } = useApp();

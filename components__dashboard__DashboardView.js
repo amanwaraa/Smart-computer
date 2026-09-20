@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
 import { TrendingUp, ReceiptText, AlertTriangle, Wallet, Users, ShoppingCart, PackagePlus, PlusCircle, ArrowUpRight, Printer, } from 'lucide-react';
 export const DashboardView = () => {
     const { invoices, products, customers, accounts, settings, setActiveTab, setShowThermalModal, activeShift, getProductStock, } = useApp();

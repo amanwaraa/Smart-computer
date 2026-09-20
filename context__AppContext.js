@@ -1,9 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.41-smart-stock-stable-2';
+import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.41-smart-stock-stable-2';
+import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.41-smart-stock-stable-2';
+import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.41-smart-stock-stable-2';
 const AppContext = createContext(null);
 const recordTime = (item = {}) => {
     const fields = ['createdAt', 'date', 'timestamp', 'startTime', 'updatedAt'];
@@ -32,6 +32,50 @@ const normalizeCurrencySettings = (value) => {
         };
     }
     return next;
+};
+const normalizeActiveWarehouseSettings = (value, warehouseRows = []) => {
+    if (!value) return value;
+    const rows = Array.isArray(warehouseRows) ? warehouseRows.filter(Boolean) : [];
+    if (!rows.length) return value;
+    const wanted = String(value.activeWarehouseId || '');
+    if (wanted && rows.some(w => String(w.id) === wanted)) return value;
+    const fallback = rows.find(w => w?.isDefault) || rows.find(w => w?.id === 'wh-main') || rows[0];
+    return fallback?.id ? { ...value, activeWarehouseId: fallback.id } : value;
+};
+// Older stock rows may not have a local update timestamp. Rebuild that metadata
+// from the last stock movement before cloud sync starts so a stale remote zero cannot erase them.
+const backfillLocalStockMetadata = async () => {
+    try {
+        const [rows, movements] = await Promise.all([
+            getAllFromStore('stock'),
+            getAllFromStore('stock_movements'),
+        ]);
+        if (!Array.isArray(rows) || !rows.length) return false;
+        const latest = new Map();
+        for (const mov of (movements || [])) {
+            if (!mov?.productId || !mov?.warehouseId) continue;
+            const key = `${mov.productId}${mov.warehouseId}`;
+            const time = new Date(mov.date || mov.createdAt || 0).getTime();
+            if (!Number.isFinite(time) || time <= 0) continue;
+            const prev = latest.get(key);
+            if (!prev || time > prev.time) latest.set(key, { time, mov });
+        }
+        const patched = [];
+        for (const row of rows) {
+            if (!row || row.updatedAt) continue;
+            const hit = latest.get(`${row.productId}${row.warehouseId}`);
+            if (!hit) continue;
+            const next = { ...row, updatedAt: new Date(hit.time).toISOString() };
+            const movementBalance = Number(hit.mov?.newBaseBalance);
+            const rowBalance = Number(row.baseQuantity);
+            if (Number.isFinite(movementBalance) && Number.isFinite(rowBalance) && Math.abs(movementBalance - rowBalance) < 0.000001) {
+                next.balanceVerifiedByMovement = true;
+            }
+            patched.push(next);
+        }
+        if (patched.length) await bulkPut('stock', patched, false);
+        return patched.length > 0;
+    } catch (_) { return false; }
 };
 export const AppProvider = ({ children }) => {
     const [isLoaded, setIsLoaded] = useState(false);
@@ -188,7 +232,7 @@ export const AppProvider = ({ children }) => {
                 setActiveEmployee((prev) => emps.find((e) => e.id === loginAccountId) || emps.find((e) => e.id === prev.id) || emps[0]);
             }
             if (sett) {
-                let normalizedSettings = normalizeCurrencySettings(sett);
+                let normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(sett), whs || []);
                 const removedRestaurantSettingKeys = ['isRestaurantModeEnabled','restaurantModeDefaultInitialized','autoPrintKitchenTicket','kitchenTicketWidth','kitchenTicketShowPrices','targetPrepTimeMinutes','tableAfterPayment','enableKitchenSoundAlerts'];
                 let removedRestaurantSettings = false;
                 for (const key of removedRestaurantSettingKeys) { if (Object.prototype.hasOwnProperty.call(normalizedSettings, key)) { delete normalizedSettings[key]; removedRestaurantSettings = true; } }
@@ -198,6 +242,7 @@ export const AppProvider = ({ children }) => {
                     || normalizedSettings.storeName !== sett.storeName
                     || normalizedSettings.logoUrl !== sett.logoUrl
                     || normalizedSettings.receiptFooterMessage !== sett.receiptFooterMessage
+                    || normalizedSettings.activeWarehouseId !== sett.activeWarehouseId
                     || removedRestaurantSettings;
                 setSettings(normalizedSettings);
                 if (settingsChanged) {
@@ -241,16 +286,17 @@ export const AppProvider = ({ children }) => {
         if (wanted.has('partner_statements')) jobs.push(getAllFromStore('partner_statements').then(v => setPartnerStatements(newestFirst(v))));
         if (wanted.has('vouchers')) jobs.push(getAllFromStore('vouchers').then(v => setVouchers((v || []).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()))));
         if (wanted.has('employees')) jobs.push(getAllFromStore('employees').then(v => { if(v?.length){ setEmployees(newestFirst(v)); const loginId=window.OscarActivation?.readRuntime?.()?.account?.id; setActiveEmployee(prev => v.find(e=>e.id===loginId)||v.find(e=>e.id===prev?.id)||v[0]); } }));
-        if (wanted.has('settings')) jobs.push(getFromStore('settings','store_config').then(async v => {
+        if (wanted.has('settings')) jobs.push(Promise.all([getFromStore('settings','store_config'), getAllFromStore('warehouses')]).then(async ([v, whRows]) => {
             if (!v) return;
-            const normalizedSettings = normalizeCurrencySettings(v);
+            const normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(v), whRows || []);
             setSettings(normalizedSettings);
             if (normalizedSettings.currency !== v.currency
                 || normalizedSettings.currencySymbol !== v.currencySymbol
                 || normalizedSettings.smartComputerBrandInitialized !== v.smartComputerBrandInitialized
                 || normalizedSettings.storeName !== v.storeName
                 || normalizedSettings.logoUrl !== v.logoUrl
-                || normalizedSettings.receiptFooterMessage !== v.receiptFooterMessage) {
+                || normalizedSettings.receiptFooterMessage !== v.receiptFooterMessage
+                || normalizedSettings.activeWarehouseId !== v.activeWarehouseId) {
                 await putInStore('settings', { key: 'store_config', ...normalizedSettings });
             }
         }));
@@ -261,23 +307,19 @@ export const AppProvider = ({ children }) => {
     useEffect(() => {
         let isMounted = true;
         setIsCloudReady(false);
-        // Safety timeout: Never let the app hang on the loading screen
-        const safetyTimer = setTimeout(() => {
-            if (isMounted) {
-                setIsLoaded(true);
-            }
-        }, 1200);
         initializeDatabase({ deferSeed: true })
             .then(async () => {
             if (!isMounted) return;
+            // Do not render product cards until the complete local stock snapshot is ready.
+            // This removes the false zero flash at startup and prepares old stock metadata before sync.
+            await backfillLocalStockMetadata();
             let existingSettings = await getFromStore('settings', 'store_config');
-            // Existing installations open immediately from IndexedDB. Cloud work happens after the UI is usable.
             if (existingSettings) await reloadData();
             let syncResult = null;
             try {
                 syncResult = await window.OscarCloudSync?.initialize?.({
                     bridge: {
-                        putInStore, deleteFromStore, getAllFromStore,
+                        putInStore, deleteFromStore, getAllFromStore, getFromStore,
                         onApplied: async (stores) => { if (isMounted) await reloadStores(stores || []); }
                     }
                 });
@@ -314,7 +356,6 @@ export const AppProvider = ({ children }) => {
             }
         })
             .finally(() => {
-            clearTimeout(safetyTimer);
             if (isMounted) {
                 setIsCloudReady(true);
                 setIsLoaded(true);
@@ -331,13 +372,11 @@ export const AppProvider = ({ children }) => {
             syncChannel.addEventListener('message', handleMessage);
             return () => {
                 isMounted = false;
-                clearTimeout(safetyTimer);
-                syncChannel.removeEventListener('message', handleMessage);
+                    syncChannel.removeEventListener('message', handleMessage);
             };
         }
         return () => {
             isMounted = false;
-            clearTimeout(safetyTimer);
         };
     }, [reloadData, reloadStores]);
     useEffect(() => {
@@ -369,21 +408,33 @@ export const AppProvider = ({ children }) => {
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
+    // Keep the device's active warehouse valid and stable. A settings row arriving from
+    // another device must not switch this device to a missing/empty warehouse and show zero stock.
+    useEffect(() => {
+        if (!isLoaded || !warehouses.length) return;
+        const normalized = normalizeActiveWarehouseSettings(settings, warehouses);
+        if (!normalized || normalized.activeWarehouseId === settings.activeWarehouseId) return;
+        setSettings(normalized);
+        putInStore('settings', { key: 'store_config', ...normalized }).catch(() => {});
+    }, [isLoaded, warehouses, settings]);
     // Active shift
     const activeShift = useMemo(() => {
         return shifts.find((s) => s.status === 'open') || null;
     }, [shifts]);
     // Get current stock for a product in a warehouse (or all warehouses)
     const getProductStock = useCallback((productId, warehouseId) => {
-        const targetWh = warehouseId || settings.activeWarehouseId;
-        if (warehouseId) {
-            const item = stock.find((s) => s.productId === productId && s.warehouseId === targetWh);
-            return item ? item.baseQuantity : 0;
+        const requestedWh = warehouseId || settings.activeWarehouseId;
+        const targetWh = requestedWh && warehouses.some(w => String(w.id) === String(requestedWh))
+            ? requestedWh
+            : (warehouses.find(w => w?.isDefault)?.id || warehouses.find(w => w?.id === 'wh-main')?.id || warehouses[0]?.id || '');
+        if (warehouseId || targetWh) {
+            const item = stock.find((s) => s.productId === productId && String(s.warehouseId) === String(targetWh));
+            return item ? Number(item.baseQuantity) || 0 : 0;
         }
         return stock
             .filter((s) => s.productId === productId)
-            .reduce((sum, s) => sum + s.baseQuantity, 0);
-    }, [stock, settings.activeWarehouseId]);
+            .reduce((sum, s) => sum + (Number(s.baseQuantity) || 0), 0);
+    }, [stock, settings.activeWarehouseId, warehouses]);
     // Cart operations
     const addToCart = useCallback((product, unit, quantity = 1) => {
         const targetUnit = unit || product.units.find((u) => u.isDefaultSale) || product.units[0];

@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useApp } from './context__AppContext.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { exportToCSV, printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { downloadProfessionalTablePDF, downloadProfessionalTableImage, downloadProfessionalVoucherPDF, downloadProfessionalVoucherImage } from './utils__professionalExport.js?v=7.9.4.40-smart-computer-products-syntax-fix';
-import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.41-smart-stock-stable-2';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
+import { exportToCSV, printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
+import { downloadProfessionalTablePDF, downloadProfessionalTableImage, downloadProfessionalVoucherPDF, downloadProfessionalVoucherImage } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
+import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
 import { FileSpreadsheet, ArrowDownLeft, ArrowUpRight, Search, Trash2, Printer, Download, Image as ImageIcon, FileText, CreditCard, User, Building2, AlertCircle, Eye, X } from 'lucide-react';
 
 const h = React.createElement;

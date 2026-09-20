@@ -1,4 +1,4 @@
-import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.40-smart-computer-products-syntax-fix';
+import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.41-smart-stock-stable-2';
 const DB_BASE_NAME = 'Oscar_Accounting_POS_DB';
 const DB_VERSION = 7;
 export const getTenantId = () => String(window.OscarActivation?.readRuntime?.()?.companyId || 'local').trim() || 'local';
@@ -168,18 +168,23 @@ export async function putInStore(storeName, value, notifySync = true) {
         } catch { changed = true; }
     }
     if (!changed) return;
+    // Every real local stock mutation gets its own timestamp. Cloud sync uses it to
+    // reject stale remote balances instead of allowing an old zero to win later.
+    const storedValue = (storeName === 'stock' && notifySync && value && typeof value === 'object')
+        ? { ...value, updatedAt: new Date().toISOString() }
+        : value;
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const request = store.put(value);
-        request.onsuccess = async () => {
+        tx.objectStore(storeName).put(storedValue);
+        tx.oncomplete = () => {
             if (notifySync) {
-                await captureCloud(storeName, value).catch(() => {});
+                captureCloud(storeName, storedValue).catch(() => {});
                 if (syncChannel) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName, tenantId: getTenantId() });
             }
             resolve();
         };
-        request.onerror = () => reject(request.error);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
 }
 export async function deleteFromStore(storeName, key, notifySync = true) {
@@ -224,18 +229,23 @@ export async function bulkPut(storeName, items, notifySync = true) {
         } catch { changedItems = Array.isArray(items) ? items : []; }
     }
     if (!changedItems.length) return;
+    if (storeName === 'stock' && notifySync) {
+        const stamp = new Date().toISOString();
+        changedItems = changedItems.map(item => (item && typeof item === 'object') ? { ...item, updatedAt: stamp } : item);
+    }
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
         changedItems.forEach((item) => store.put(item));
-        tx.oncomplete = async () => {
+        tx.oncomplete = () => {
             if (notifySync) {
-                await Promise.allSettled(changedItems.map(item => captureCloud(storeName, item)));
+                Promise.allSettled(changedItems.map(item => captureCloud(storeName, item))).catch(() => {});
                 if (syncChannel) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName, tenantId: getTenantId() });
             }
             resolve();
         };
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
 }
 // Initial default settings
