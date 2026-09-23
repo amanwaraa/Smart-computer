@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.41-smart-stock-stable-2';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
-import { downloadProfessionalTablePDF, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
+import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
+import { downloadProfessionalTablePDF, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
 import { Plus, Search, Trash2, Edit2, FileSpreadsheet, FileText, Settings2, UsersRound, Receipt, WalletCards, X } from 'lucide-react';
 
 const h = React.createElement;
@@ -217,6 +217,10 @@ export const ExpensesView = () => {
     setShowAddModal(true);
   };
   const editExpense = exp => {
+    if (exp?.referenceType === 'PURCHASE_SHIPPING' && exp?.linkedPurchaseId) {
+      showToast('مصروف الشحن التلقائي يُعدّل من فاتورة المشتريات المرتبطة', 'warning');
+      return;
+    }
     setEditingExpense(exp);
     setAmount(String(exp.amount || ''));
     setCategory(exp.category || configuredCategories[0] || 'أخرى');
@@ -261,10 +265,12 @@ export const ExpensesView = () => {
     h('td',{className:'p-3 font-mono font-black text-rose-600'},`${money(exp.amount)} ${settings.currencySymbol}`),
     h('td',{className:'p-3'},exp.accountName || '-'),
     h('td',{className:'p-3 max-w-[260px] truncate',title:exp.notes||''},exp.notes || '-'),
-    h('td',{className:'p-3'},h('div',{className:'flex gap-1 justify-end'},
-      h('button',{type:'button',onClick:()=>editExpense(exp),className:'p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50',title:'تعديل'},h(Edit2,{className:'w-3.5 h-3.5'})),
-      h('button',{type:'button',onClick:()=>softDeleteExpense(exp.id),className:'p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50',title:'حذف'},h(Trash2,{className:'w-3.5 h-3.5'}))
-    ))
+    h('td',{className:'p-3'}, exp?.referenceType === 'PURCHASE_SHIPPING' && exp?.linkedPurchaseId
+      ? h('span',{className:'inline-flex items-center px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-[10px] font-black border border-blue-100',title:'يُحدّث تلقائياً عند تعديل فاتورة المشتريات'},'تلقائي من المشتريات')
+      : h('div',{className:'flex gap-1 justify-end'},
+          h('button',{type:'button',onClick:()=>editExpense(exp),className:'p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50',title:'تعديل'},h(Edit2,{className:'w-3.5 h-3.5'})),
+          h('button',{type:'button',onClick:()=>softDeleteExpense(exp.id),className:'p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50',title:'حذف'},h(Trash2,{className:'w-3.5 h-3.5'}))
+        ))
   ));
   const receiptRows = receiptPager.pageItems.map(v => h('tr',{key:v.id,className:'border-b border-slate-100 hover:bg-slate-50/70'},
     h('td',{className:'p-3 font-mono font-bold'},v.reference || '-'),

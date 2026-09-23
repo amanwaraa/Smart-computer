@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
-import { ProductGrid } from './components__pos__ProductGrid.js?v=7.9.4.41-smart-stock-stable-2';
-import { CartPanel } from './components__pos__CartPanel.js?v=7.9.4.41-smart-stock-stable-2';
-import { FullCartView } from './components__pos__FullCartView.js?v=7.9.4.41-smart-stock-stable-2';
-import { PaymentModal } from './components__pos__PaymentModal.js?v=7.9.4.41-smart-stock-stable-2';
-import { CameraScannerModal } from './components__pos__CameraScannerModal.js?v=7.9.4.41-smart-stock-stable-2';
-import { HoldInvoicesModal } from './components__pos__HoldInvoicesModal.js?v=7.9.4.41-smart-stock-stable-2';
+import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { ProductGrid } from './components__pos__ProductGrid.js?v=7.9.4.44-purchase-shipping';
+import { CartPanel } from './components__pos__CartPanel.js?v=7.9.4.44-purchase-shipping';
+import { FullCartView } from './components__pos__FullCartView.js?v=7.9.4.44-purchase-shipping';
+import { PaymentModal } from './components__pos__PaymentModal.js?v=7.9.4.44-purchase-shipping';
+import { CameraScannerModal } from './components__pos__CameraScannerModal.js?v=7.9.4.44-purchase-shipping';
+import { HoldInvoicesModal } from './components__pos__HoldInvoicesModal.js?v=7.9.4.44-purchase-shipping';
 import { Barcode, Camera, Maximize2 } from 'lucide-react';
 const h = React.createElement;
 

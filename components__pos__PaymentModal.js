@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.41-smart-stock-stable-2';
+import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
 import { Banknote, Clock, Split, CheckCircle2, X, AlertCircle, Coins, } from 'lucide-react';
 export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
     const { cart, customers, selectedCustomer, setSelectedCustomer, accounts, settings, createSaleInvoice, setShowThermalModal, saveCustomer, showToast, invoiceDiscountType, setInvoiceDiscountType, invoiceDiscountValue, setInvoiceDiscountValue, } = useApp();
@@ -12,8 +12,12 @@ export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
         return s + lineSub * (i.taxRate / 100);
     }, 0);
     const beforeInvoiceDiscount = Math.round((subtotal + taxTotal) * 100) / 100;
+    const [shippingCost, setShippingCost] = useState('');
+    const [shippingChargeMode, setShippingChargeMode] = useState(settings.shippingDefaultChargeMode === 'profit' ? 'profit' : 'customer');
     const invoiceDiscountAmount = invoiceDiscountType === 'percent' ? Math.min(beforeInvoiceDiscount, beforeInvoiceDiscount * Math.max(0, Math.min(100, Number(invoiceDiscountValue) || 0)) / 100) : Math.min(beforeInvoiceDiscount, Math.max(0, Number(invoiceDiscountValue) || 0));
-    const rawGrandTotal = Math.max(0, beforeInvoiceDiscount - invoiceDiscountAmount);
+    const baseGrandTotal = Math.max(0, beforeInvoiceDiscount - invoiceDiscountAmount);
+    const shippingAmount = Math.max(0, Number(shippingCost) || 0);
+    const rawGrandTotal = baseGrandTotal + (shippingChargeMode === 'customer' ? shippingAmount : 0);
     const grandTotal = settings.scaleModeEnabled ? Math.round(rawGrandTotal) : Math.round(rawGrandTotal * 100) / 100;
     const defaultAccountId = accounts.find((a) => a.isDefault)?.id || accounts.find((a) => a.type === 'cash')?.id || accounts[0]?.id || '';
     const [paymentType, setPaymentType] = useState('cash');
@@ -37,12 +41,19 @@ export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
                 requestAnimationFrame(() => document.activeElement?.blur?.());
             }
             setPaymentType('cash');
-            setCashGiven(grandTotal.toString());
+            setShippingCost('');
+            setShippingChargeMode(settings.shippingDefaultChargeMode === 'profit' ? 'profit' : 'customer');
+            setCashGiven(baseGrandTotal.toString());
             setNotes('');
             setSelectedAccountId(defaultAccountId);
-            setMultiRows([{ accountId: defaultAccountId, method: 'cash', amount: grandTotal }]);
+            setMultiRows([{ accountId: defaultAccountId, method: 'cash', amount: baseGrandTotal }]);
         }
-    }, [isOpen, grandTotal, accounts]);
+    }, [isOpen, defaultAccountId, settings.shippingDefaultChargeMode]);
+    useEffect(() => {
+        if (!isOpen) return;
+        setCashGiven(grandTotal.toString());
+        setMultiRows((prev) => prev.length <= 1 ? [{ accountId: defaultAccountId, method: 'cash', amount: grandTotal }] : prev);
+    }, [shippingCost, shippingChargeMode, invoiceDiscountType, invoiceDiscountValue]);
     if (!isOpen)
         return null;
     const numCashGiven = parseFloat(cashGiven) || 0;
@@ -128,6 +139,8 @@ export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
                 paymentType,
                 paidAmount,
                 payments,
+                shippingCost: shippingAmount,
+                shippingChargeMode,
                 notes,
             });
             if (inv) {
@@ -154,7 +167,7 @@ export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
                                                     ? 'border-amber-600 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
                                                     : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50'}`, children: [_jsx(Coins, { className: "w-5 h-5 mb-1" }), _jsx("span", { children: "\u062f\u0641\u0639 \u062c\u0632\u0626\u064a" })] }), _jsxs("button", { type: "button", onClick: () => setPaymentType('multi'), className: `flex flex-col items-center justify-center p-2.5 rounded-xl border text-xs font-bold transition ${paymentType === 'multi'
                                                     ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
-                                                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50'}`, children: [_jsx(Split, { className: "w-5 h-5 mb-1" }), _jsx("span", { children: "\u062f\u0641\u0639 \u0645\u062a\u0639\u062f\u062f" })] })] })] }), _jsxs("div", { children: [_jsx(SearchableDropdown, { id: "payment-customer-dropdown", label: "\u0627\u0644\u0639\u0645\u064a\u0644:", placeholder: "\u0627\u062e\u062a\u0631 \u0627\u0644\u0639\u0645\u064a\u0644...", options: [{ id:'cust-walkin', label:'عميل نقدي', subLabel:'الافتراضي للبيع النقدي المباشر' }, ...customers.filter((c)=>c && c.id!=='cust-walkin' && !c.deletedAt).map((c) => ({
+                                                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50'}`, children: [_jsx(Split, { className: "w-5 h-5 mb-1" }), _jsx("span", { children: "\u062f\u0641\u0639 \u0645\u062a\u0639\u062f\u062f" })] })] })] }), _jsxs("div", { className: "rounded-xl border border-blue-200 bg-blue-50/70 dark:bg-blue-950/20 dark:border-blue-900 p-3 space-y-2", children: [_jsxs("div", { className: "flex items-center justify-between gap-2", children: [_jsxs("div", { children: [_jsx("div", { className: "text-xs font-black text-blue-900 dark:text-blue-200", children: "مصروف الشحن" }), _jsx("div", { className: "text-[10px] text-blue-700/70 dark:text-blue-300/70", children: shippingChargeMode === 'customer' ? "يُضاف على إجمالي العميل" : "لا يُضاف على العميل ويُخصم من ربح الفاتورة" })] }), _jsxs("div", { className: "inline-flex rounded-lg overflow-hidden border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900", children: [_jsx("button", { type: "button", onClick: () => setShippingChargeMode('customer'), className: `px-2.5 py-1.5 text-[10px] font-black ${shippingChargeMode === 'customer' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'}`, children: "على العميل" }), _jsx("button", { type: "button", onClick: () => setShippingChargeMode('profit'), className: `px-2.5 py-1.5 text-[10px] font-black ${shippingChargeMode === 'profit' ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300'}`, children: "من الربح" })] })] }), _jsxs("div", { className: "flex items-center gap-2", children: [_jsx("input", { type: "number", min: "0", step: "any", inputMode: "decimal", value: shippingCost, onChange: (e) => setShippingCost(e.target.value), placeholder: "0.00", className: "flex-1 px-3 py-2 text-sm font-mono font-black text-left rounded-lg border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-900 focus:outline-none focus:border-blue-500" }), _jsx("span", { className: "text-xs font-bold text-blue-800 dark:text-blue-300 whitespace-nowrap", children: settings.currencySymbol })] }), shippingAmount > 0 && _jsxs("div", { className: "flex justify-between text-[10px] font-bold text-blue-800 dark:text-blue-300", children: [_jsx("span", { children: shippingChargeMode === 'customer' ? "الشحن المضاف للفاتورة" : "الشحن المخصوم من الربح" }), _jsxs("span", { className: "font-mono", children: [shippingAmount.toFixed(2), " ", settings.currencySymbol] })] })] }), _jsxs("div", { children: [_jsx(SearchableDropdown, { id: "payment-customer-dropdown", label: "\u0627\u0644\u0639\u0645\u064a\u0644:", placeholder: "\u0627\u062e\u062a\u0631 \u0627\u0644\u0639\u0645\u064a\u0644...", options: [{ id:'cust-walkin', label:'عميل نقدي', subLabel:'الافتراضي للبيع النقدي المباشر' }, ...customers.filter((c)=>c && c.id!=='cust-walkin' && !c.deletedAt).map((c) => ({
                                             id: c.id,
                                             label: c.name,
                                             subLabel: c.phone || 'بدون هاتف',

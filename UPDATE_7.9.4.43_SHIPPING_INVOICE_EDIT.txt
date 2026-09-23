@@ -1,0 +1,21 @@
+Smart computer — Update 7.9.4.43
+
+1) Sales shipping expense
+- Added shipping amount to the payment/invoice screen.
+- Shipping can be charged to the customer or deducted from invoice profit.
+- Default mode is "customer" and can be changed from Settings.
+- Customer-paid shipping is included in invoice grand total and shown on customer receipt/export.
+- Profit-paid shipping does not increase the customer total and is deducted in profit reporting.
+
+2) Purchase paid amount
+- New purchase invoices automatically set Paid = Invoice Total while the total is being built.
+- The value remains editable; once manually changed it is not overwritten automatically.
+
+3) Invoice editing
+- Sales invoices can be edited with stock, customer, account, shift and FIFO effects recalculated.
+- Purchase invoices can be edited with stock delta, FIFO remaining batches, supplier balance and accounts recalculated.
+- For purchase safety, the original warehouse is fixed during editing and quantities cannot be reduced below amounts already consumed/sold from that purchase.
+- Sales invoices linked to a sales return are protected from editing until the return is cancelled.
+
+4) PWA
+- New service-worker cache build to prevent stale code after update.

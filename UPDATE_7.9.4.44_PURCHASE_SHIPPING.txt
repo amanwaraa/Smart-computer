@@ -1,0 +1,13 @@
+Smart Computer POS v7.9.4.44 — Purchase Shipping Expense
+
+- Added a dedicated shipping expense field to purchase invoices.
+- Purchase shipping is treated as an operating expense, not as inventory cost.
+- Shipping is included in the invoice cash paid total.
+- Supplier debt and supplier paid amount are calculated from goods net only, excluding shipping.
+- Shipping is automatically recorded under the expense category: نقل وشحن.
+- Automatic shipping expense records are linked to the purchase invoice and cannot be edited/deleted independently.
+- Editing a purchase invoice updates the linked shipping expense instead of duplicating it.
+- Deleting a purchase invoice removes its linked shipping expense and reverses the payment only once.
+- Purchase PDF/image details show goods net, shipping, total with shipping, paid including shipping, and supplier remaining amount.
+- Reports already subtract all expense records from net profit, so purchase shipping reduces net profit automatically.
+- PWA cache/import version bumped to 7.9.4.44-purchase-shipping.

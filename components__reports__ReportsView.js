@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
-import { exportToCSV } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
+import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { exportToCSV } from './utils__export.js?v=7.9.4.44-purchase-shipping';
 import { Download, Package, } from 'lucide-react';
 export const ReportsView = () => {
     const { invoices, expenses, products, customers, suppliers, settings, getProductStock, } = useApp();
@@ -49,7 +49,8 @@ export const ReportsView = () => {
             totalCostOfGoodsSold -= exactCost;
         });
     });
-    const grossProfit = netSales - totalCostOfGoodsSold;
+    const shippingCosts = salesInvoices.reduce((s, inv) => s + Math.max(0, Number(inv.shippingCost) || 0), 0);
+    const grossProfit = netSales - totalCostOfGoodsSold - shippingCosts;
     const totalExpenses = periodExpenses.reduce((s, e) => s + e.amount, 0);
     const netOperatingProfit = grossProfit - totalExpenses;
     // Inventory valuation
@@ -69,7 +70,8 @@ export const ReportsView = () => {
             ['إجمالي المرتجعات', returnsTotal.toFixed(2)],
             ['صافي المبيعات', netSales.toFixed(2)],
             ['تكلفة البضاعة المباعة (FIFO)', totalCostOfGoodsSold.toFixed(2)],
-            ['مجمل أرباح المبيعات', grossProfit.toFixed(2)],
+            ['مصروفات شحن فواتير المبيعات', shippingCosts.toFixed(2)],
+            ['مجمل أرباح المبيعات بعد الشحن', grossProfit.toFixed(2)],
             ['إجمالي المصروفات التشغيلية', totalExpenses.toFixed(2)],
             ['صافي الربح النهائي', netOperatingProfit.toFixed(2)],
             ['تقييم المخزون بسعر التكلفة', totalInventoryCostValue.toFixed(2)],

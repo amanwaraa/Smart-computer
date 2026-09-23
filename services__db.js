@@ -1,4 +1,4 @@
-import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.41-smart-stock-stable-2';
+import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.44-purchase-shipping';
 const DB_BASE_NAME = 'Oscar_Accounting_POS_DB';
 const DB_VERSION = 7;
 export const getTenantId = () => String(window.OscarActivation?.readRuntime?.()?.companyId || 'local').trim() || 'local';
@@ -120,6 +120,10 @@ function openDB() {
 }
 // Cloud sync capture is intentionally kept outside IndexedDB transactions.
 function captureCloud(storeName, value, opts={}) {
+    // Inventory balances are a local cache only. The cloud synchronizes immutable
+    // stock_movements; every device rebuilds the balance from those movements.
+    // Never sync the mutable `stock` snapshot itself (that was the source of random zeroes).
+    if (storeName === 'stock') return Promise.resolve(false);
     try { if (!window.OscarCloudSync?.suppress) return window.OscarCloudSync?.captureStoreChange?.(storeName, value, opts) || Promise.resolve(false); } catch (e) { console.warn('Cloud capture warning', e); }
     return Promise.resolve(false);
 }
@@ -170,8 +174,9 @@ export async function putInStore(storeName, value, notifySync = true) {
     if (!changed) return;
     // Every real local stock mutation gets its own timestamp. Cloud sync uses it to
     // reject stale remote balances instead of allowing an old zero to win later.
-    const storedValue = (storeName === 'stock' && notifySync && value && typeof value === 'object')
-        ? { ...value, updatedAt: new Date().toISOString() }
+    const writeStamp = new Date().toISOString();
+    const storedValue = (storeName === 'stock' && value && typeof value === 'object')
+        ? { ...value, updatedAt: value.updatedAt || writeStamp }
         : value;
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
@@ -229,9 +234,9 @@ export async function bulkPut(storeName, items, notifySync = true) {
         } catch { changedItems = Array.isArray(items) ? items : []; }
     }
     if (!changedItems.length) return;
-    if (storeName === 'stock' && notifySync) {
+    if (storeName === 'stock') {
         const stamp = new Date().toISOString();
-        changedItems = changedItems.map(item => (item && typeof item === 'object') ? { ...item, updatedAt: stamp } : item);
+        changedItems = changedItems.map(item => (item && typeof item === 'object') ? { ...item, updatedAt: item.updatedAt || stamp } : item);
     }
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
@@ -248,6 +253,204 @@ export async function bulkPut(storeName, items, notifySync = true) {
         tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
 }
+
+// -----------------------------------------------------------------------------
+// Inventory engine v42
+// -----------------------------------------------------------------------------
+// `stock` is deliberately a derived local cache. The durable/source-of-truth
+// inventory events live in `stock_movements` and are synchronized between devices.
+// This prevents an old/stale mutable balance (especially zero) from overwriting the
+// real quantity after a background sync.
+export const INVENTORY_ENGINE_VERSION = 42;
+export const INVENTORY_BASELINE_TYPE = 'inventory_baseline_v42';
+
+const inventoryRowKey = (productId, warehouseId) => `${String(productId || '')}\u0001${String(warehouseId || '')}`;
+const movementEventTime = (row) => {
+    const values = [row?.createdAt, row?.inventoryEventAt, row?.date, row?.timestamp];
+    for (const value of values) {
+        if (!value) continue;
+        const t = new Date(value).getTime();
+        if (Number.isFinite(t) && t > 0) return t;
+    }
+    const idMatch = String(row?.id || '').match(/(\d{10,})/);
+    return idMatch ? Number(idMatch[1]) : 0;
+};
+const finiteNumber = (value, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+};
+
+export async function getCanonicalStockSnapshot({ repair = true } = {}) {
+    const [cachedRows, movements] = await Promise.all([
+        getAllFromStore('stock').catch(() => []),
+        getAllFromStore('stock_movements').catch(() => []),
+    ]);
+
+    const cached = new Map();
+    for (const row of (cachedRows || [])) {
+        if (!row?.productId || !row?.warehouseId) continue;
+        cached.set(inventoryRowKey(row.productId, row.warehouseId), row);
+    }
+
+    const grouped = new Map();
+    for (const mov of (movements || [])) {
+        if (!mov?.productId || !mov?.warehouseId) continue;
+        const key = inventoryRowKey(mov.productId, mov.warehouseId);
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(mov);
+    }
+
+    const allKeys = new Set([...cached.keys(), ...grouped.keys()]);
+    const canonicalRows = [];
+
+    for (const key of allKeys) {
+        const [productId, warehouseId] = key.split('\u0001');
+        const oldRow = cached.get(key);
+        const events = (grouped.get(key) || []).slice().sort((a, b) => {
+            const dt = movementEventTime(a) - movementEventTime(b);
+            return dt || String(a?.id || '').localeCompare(String(b?.id || ''));
+        });
+
+        const baselines = events.filter(e => e?.type === INVENTORY_BASELINE_TYPE);
+        let quantity;
+
+        if (baselines.length) {
+            // Use the newest explicit baseline and add every later inventory delta.
+            const baseline = baselines[baselines.length - 1];
+            const baselineTime = movementEventTime(baseline);
+            quantity = finiteNumber(baseline.baselineQuantity, finiteNumber(baseline.newBaseBalance, 0));
+            for (const event of events) {
+                if (event === baseline || event?.type === INVENTORY_BASELINE_TYPE) continue;
+                const eventTime = movementEventTime(event);
+                if (eventTime < baselineTime) continue;
+                quantity += finiteNumber(event.baseQuantityChange, 0);
+            }
+        } else if (events.length && events.every(e => Number(e?.inventoryEventVersion || 0) >= INVENTORY_ENGINE_VERSION)) {
+            // New products created entirely on the new engine can be rebuilt from zero.
+            quantity = events.reduce((sum, e) => sum + finiteNumber(e.baseQuantityChange, 0), 0);
+        } else if (events.length) {
+            // Legacy migration path: preserve the balance from the latest trustworthy
+            // movement. This also repairs a cache row that was wrongly overwritten to zero.
+            const latest = events[events.length - 1];
+            const latestBalance = Number(latest?.newBaseBalance);
+            quantity = Number.isFinite(latestBalance)
+                ? latestBalance
+                : finiteNumber(oldRow?.baseQuantity, 0);
+        } else {
+            // No movement history exists: never destroy legacy data; keep its current value.
+            quantity = finiteNumber(oldRow?.baseQuantity, 0);
+        }
+
+        if (!Number.isFinite(quantity)) quantity = finiteNumber(oldRow?.baseQuantity, 0);
+        // Preserve negative inventory only if the application intentionally allowed it.
+        const row = {
+            ...(oldRow || {}),
+            productId,
+            warehouseId,
+            baseQuantity: quantity,
+            inventoryEngineVersion: INVENTORY_ENGINE_VERSION,
+            updatedAt: oldRow?.updatedAt || new Date().toISOString(),
+        };
+        canonicalRows.push(row);
+    }
+
+    if (repair && canonicalRows.length) {
+        const changed = canonicalRows.filter(row => {
+            const old = cached.get(inventoryRowKey(row.productId, row.warehouseId));
+            return !old
+                || Math.abs(finiteNumber(old.baseQuantity, 0) - finiteNumber(row.baseQuantity, 0)) > 0.000001
+                || Number(old.inventoryEngineVersion || 0) !== INVENTORY_ENGINE_VERSION;
+        });
+        if (changed.length) await bulkPut('stock', changed, false);
+    }
+
+    return canonicalRows;
+}
+
+export async function ensureInventoryBaselines() {
+    const canonicalRows = await getCanonicalStockSnapshot({ repair: true });
+    if (!canonicalRows.length) return 0;
+
+    const movements = await getAllFromStore('stock_movements').catch(() => []);
+    const hasBaseline = new Set(
+        (movements || [])
+            .filter(m => m?.type === INVENTORY_BASELINE_TYPE && m?.productId && m?.warehouseId)
+            .map(m => inventoryRowKey(m.productId, m.warehouseId))
+    );
+
+    const now = new Date().toISOString();
+    const baselines = canonicalRows
+        .filter(row => row?.productId && row?.warehouseId && !hasBaseline.has(inventoryRowKey(row.productId, row.warehouseId)))
+        .map(row => ({
+            id: `inv-baseline-v42-${encodeURIComponent(String(row.productId))}-${encodeURIComponent(String(row.warehouseId))}`,
+            date: now,
+            createdAt: now,
+            inventoryEventAt: now,
+            inventoryEventVersion: INVENTORY_ENGINE_VERSION,
+            type: INVENTORY_BASELINE_TYPE,
+            productId: row.productId,
+            warehouseId: row.warehouseId,
+            unitName: 'وحدة أساسية',
+            quantityInUnit: 0,
+            conversionFactor: 1,
+            baseQuantityChange: 0,
+            baselineQuantity: finiteNumber(row.baseQuantity, 0),
+            newBaseBalance: finiteNumber(row.baseQuantity, 0),
+            referenceType: 'INVENTORY_ENGINE_MIGRATION',
+            notes: 'Inventory engine baseline v42',
+        }));
+
+    if (baselines.length) await bulkPut('stock_movements', baselines, true);
+    return baselines.length;
+}
+
+export async function commitInventoryTransaction({ stockRows = [], movementRows = [], productRows = [] } = {}) {
+    const db = await openDB();
+    const stamp = new Date().toISOString();
+    const normalizedStock = (stockRows || []).filter(Boolean).map(row => ({
+        ...row,
+        updatedAt: stamp,
+        inventoryEngineVersion: INVENTORY_ENGINE_VERSION,
+    }));
+    const normalizedMovements = (movementRows || []).filter(Boolean).map(row => ({
+        ...row,
+        createdAt: row.createdAt || stamp,
+        inventoryEventAt: row.inventoryEventAt || stamp,
+        inventoryEventVersion: INVENTORY_ENGINE_VERSION,
+    }));
+    const normalizedProducts = (productRows || []).filter(Boolean);
+
+    const stores = ['stock', 'stock_movements'];
+    if (normalizedProducts.length) stores.push('products');
+
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(stores, 'readwrite');
+        const stockStore = tx.objectStore('stock');
+        const movementStore = tx.objectStore('stock_movements');
+        for (const row of normalizedStock) stockStore.put(row);
+        for (const row of normalizedMovements) movementStore.put(row);
+        if (normalizedProducts.length) {
+            const productStore = tx.objectStore('products');
+            for (const row of normalizedProducts) productStore.put(row);
+        }
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Inventory transaction aborted'));
+    });
+
+    // Only immutable movements/products are synchronized. The stock snapshot stays local.
+    await Promise.allSettled([
+        ...normalizedMovements.map(row => captureCloud('stock_movements', row)),
+        ...normalizedProducts.map(row => captureCloud('products', row)),
+    ]);
+    if (syncChannel) {
+        syncChannel.postMessage({ type: 'STORE_UPDATED', storeName: 'stock', tenantId: getTenantId() });
+        syncChannel.postMessage({ type: 'STORE_UPDATED', storeName: 'stock_movements', tenantId: getTenantId() });
+        if (normalizedProducts.length) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName: 'products', tenantId: getTenantId() });
+    }
+    return { stockRows: normalizedStock, movementRows: normalizedMovements, productRows: normalizedProducts };
+}
+
 // Initial default settings
 export const DEFAULT_SETTINGS = {
     storeName: 'Smart computer',
@@ -264,6 +467,7 @@ export const DEFAULT_SETTINGS = {
     autoPrintReceipt: true,
     printOnSave: true,
     scaleModeEnabled: false,
+    shippingDefaultChargeMode: 'customer',
     receiptShowLogo: true,
     receiptShowStoreInfo: true,
     receiptShowBarcode: true,

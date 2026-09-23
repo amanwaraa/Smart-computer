@@ -1,9 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.41-smart-stock-stable-2';
-import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.41-smart-stock-stable-2';
-import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.41-smart-stock-stable-2';
-import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.41-smart-stock-stable-2';
+import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, getCanonicalStockSnapshot, ensureInventoryBaselines, commitInventoryTransaction, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.44-purchase-shipping';
+import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.44-purchase-shipping';
+import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.44-purchase-shipping';
+import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.44-purchase-shipping';
 const AppContext = createContext(null);
 const recordTime = (item = {}) => {
     const fields = ['createdAt', 'date', 'timestamp', 'startTime', 'updatedAt'];
@@ -20,6 +20,7 @@ const newestFirst = (items = []) => [...(items || [])].sort((a, b) => recordTime
 const normalizeCurrencySettings = (value) => {
     if (!value) return value;
     let next = { ...value, currency: 'EGP', currencySymbol: 'ج.م' };
+    if (!['customer', 'profit'].includes(next.shippingDefaultChargeMode)) next.shippingDefaultChargeMode = 'customer';
     // One-time Smart computer branding migration. Afterwards the user can still upload a custom logo/name.
     if (next.smartComputerBrandInitialized !== true) {
         const oldName = String(next.storeName || '').trim();
@@ -41,41 +42,6 @@ const normalizeActiveWarehouseSettings = (value, warehouseRows = []) => {
     if (wanted && rows.some(w => String(w.id) === wanted)) return value;
     const fallback = rows.find(w => w?.isDefault) || rows.find(w => w?.id === 'wh-main') || rows[0];
     return fallback?.id ? { ...value, activeWarehouseId: fallback.id } : value;
-};
-// Older stock rows may not have a local update timestamp. Rebuild that metadata
-// from the last stock movement before cloud sync starts so a stale remote zero cannot erase them.
-const backfillLocalStockMetadata = async () => {
-    try {
-        const [rows, movements] = await Promise.all([
-            getAllFromStore('stock'),
-            getAllFromStore('stock_movements'),
-        ]);
-        if (!Array.isArray(rows) || !rows.length) return false;
-        const latest = new Map();
-        for (const mov of (movements || [])) {
-            if (!mov?.productId || !mov?.warehouseId) continue;
-            const key = `${mov.productId}${mov.warehouseId}`;
-            const time = new Date(mov.date || mov.createdAt || 0).getTime();
-            if (!Number.isFinite(time) || time <= 0) continue;
-            const prev = latest.get(key);
-            if (!prev || time > prev.time) latest.set(key, { time, mov });
-        }
-        const patched = [];
-        for (const row of rows) {
-            if (!row || row.updatedAt) continue;
-            const hit = latest.get(`${row.productId}${row.warehouseId}`);
-            if (!hit) continue;
-            const next = { ...row, updatedAt: new Date(hit.time).toISOString() };
-            const movementBalance = Number(hit.mov?.newBaseBalance);
-            const rowBalance = Number(row.baseQuantity);
-            if (Number.isFinite(movementBalance) && Number.isFinite(rowBalance) && Math.abs(movementBalance - rowBalance) < 0.000001) {
-                next.balanceVerifiedByMovement = true;
-            }
-            patched.push(next);
-        }
-        if (patched.length) await bulkPut('stock', patched, false);
-        return patched.length > 0;
-    } catch (_) { return false; }
 };
 export const AppProvider = ({ children }) => {
     const [isLoaded, setIsLoaded] = useState(false);
@@ -187,7 +153,7 @@ export const AppProvider = ({ children }) => {
                 getAllFromStore('products'),
                 getAllFromStore('categories'),
                 getAllFromStore('warehouses'),
-                getAllFromStore('stock'),
+                getCanonicalStockSnapshot({ repair: true }),
                 getAllFromStore('stock_movements'),
                 getAllFromStore('invoices'),
                 getAllFromStore('purchases'),
@@ -209,7 +175,7 @@ export const AppProvider = ({ children }) => {
             setCategories((cats || []).sort((a, b) => a.displayOrder - b.displayOrder));
             setWarehouses(whs || []);
             setStock(stk || []);
-            setStockMovements((stkMovs || []).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            setStockMovements((stkMovs || []).filter(m => m?.type !== 'inventory_baseline_v42').sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime()));
             setInvoices((invs || []).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
             setPurchases((purchs || []).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
             const registeredCustomers = (custs || []).filter((c) => c && c.id !== CASH_CUSTOMER.id);
@@ -243,6 +209,7 @@ export const AppProvider = ({ children }) => {
                     || normalizedSettings.logoUrl !== sett.logoUrl
                     || normalizedSettings.receiptFooterMessage !== sett.receiptFooterMessage
                     || normalizedSettings.activeWarehouseId !== sett.activeWarehouseId
+                    || normalizedSettings.shippingDefaultChargeMode !== sett.shippingDefaultChargeMode
                     || removedRestaurantSettings;
                 setSettings(normalizedSettings);
                 if (settingsChanged) {
@@ -271,8 +238,15 @@ export const AppProvider = ({ children }) => {
         if (wanted.has('products')) jobs.push(getAllFromStore('products').then(v => setProducts(newestFirst(v))));
         if (wanted.has('categories')) jobs.push(getAllFromStore('categories').then(v => setCategories((v || []).sort((a,b)=>(a.displayOrder||0)-(b.displayOrder||0)))));
         if (wanted.has('warehouses')) jobs.push(getAllFromStore('warehouses').then(v => setWarehouses(v || [])));
-        if (wanted.has('stock')) jobs.push(getAllFromStore('stock').then(v => setStock(v || [])));
-        if (wanted.has('stock_movements')) jobs.push(getAllFromStore('stock_movements').then(v => setStockMovements((v || []).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()))));
+        if (wanted.has('stock') || wanted.has('stock_movements')) {
+            jobs.push(Promise.all([
+                getCanonicalStockSnapshot({ repair: true }),
+                getAllFromStore('stock_movements'),
+            ]).then(([stockRows, movementRows]) => {
+                setStock(stockRows || []);
+                setStockMovements((movementRows || []).filter(m => m?.type !== 'inventory_baseline_v42').sort((a,b)=>new Date(b.createdAt || b.date || 0).getTime()-new Date(a.createdAt || a.date || 0).getTime()));
+            }));
+        }
         if (wanted.has('invoices')) jobs.push(getAllFromStore('invoices').then(v => setInvoices((v || []).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()))));
         if (wanted.has('purchases')) jobs.push(getAllFromStore('purchases').then(v => setPurchases((v || []).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()))));
         if (wanted.has('customers')) jobs.push(getAllFromStore('customers').then(v => { const real=(v||[]).filter(c=>c&&c.id!==CASH_CUSTOMER.id); setCustomers(newestFirst(real)); setSelectedCustomer(prev => (!prev || prev.id===CASH_CUSTOMER.id) ? CASH_CUSTOMER : (real.find(c=>c.id===prev.id)||CASH_CUSTOMER)); }));
@@ -296,7 +270,8 @@ export const AppProvider = ({ children }) => {
                 || normalizedSettings.storeName !== v.storeName
                 || normalizedSettings.logoUrl !== v.logoUrl
                 || normalizedSettings.receiptFooterMessage !== v.receiptFooterMessage
-                || normalizedSettings.activeWarehouseId !== v.activeWarehouseId) {
+                || normalizedSettings.activeWarehouseId !== v.activeWarehouseId
+                || normalizedSettings.shippingDefaultChargeMode !== v.shippingDefaultChargeMode) {
                 await putInStore('settings', { key: 'store_config', ...normalizedSettings });
             }
         }));
@@ -310,9 +285,10 @@ export const AppProvider = ({ children }) => {
         initializeDatabase({ deferSeed: true })
             .then(async () => {
             if (!isMounted) return;
-            // Do not render product cards until the complete local stock snapshot is ready.
-            // This removes the false zero flash at startup and prepares old stock metadata before sync.
-            await backfillLocalStockMetadata();
+            // Build the local inventory cache before product cards are rendered.
+            // The balance is reconstructed from durable stock movements, while legacy
+            // stock rows are preserved as a fallback. This prevents any temporary zero.
+            await getCanonicalStockSnapshot({ repair: true });
             let existingSettings = await getFromStore('settings', 'store_config');
             if (existingSettings) await reloadData();
             let syncResult = null;
@@ -324,6 +300,15 @@ export const AppProvider = ({ children }) => {
                     }
                 });
             } catch (syncError) { console.warn('Cloud sync bootstrap warning:', syncError); }
+            // After remote movement history is available, establish a one-time inventory
+            // baseline for every existing product/warehouse. Future quantities are rebuilt
+            // from baseline + immutable movement deltas, never from a mutable cloud stock row.
+            try {
+                await ensureInventoryBaselines();
+                if (isMounted) await reloadStores(['stock', 'stock_movements']);
+            } catch (inventoryError) {
+                console.warn('Inventory baseline warning:', inventoryError);
+            }
             if (isMounted) setIsCloudReady(true);
             // Remove the old persisted walk-in customer. Cash customer is now virtual POS-only.
             try {
@@ -595,15 +580,21 @@ export const AppProvider = ({ children }) => {
         const isDirectSale = Array.isArray(payload.items) && payload.items.length > 0;
         const saleCart = isDirectSale ? payload.items : cart;
         if (saleCart.length === 0) { showToast('السلة فارغة!', 'error'); return null; }
-        const warehouseId = settings.activeWarehouseId;
+        const baseProducts = Array.isArray(payload.__baseProducts) ? payload.__baseProducts : products;
+        const baseStock = Array.isArray(payload.__baseStock) ? payload.__baseStock : stock;
+        const baseAccounts = Array.isArray(payload.__baseAccounts) ? payload.__baseAccounts : accounts;
+        const baseCustomers = Array.isArray(payload.__baseCustomers) ? payload.__baseCustomers : customers;
+        const baseActiveShift = payload.__baseActiveShift !== undefined ? payload.__baseActiveShift : activeShift;
+        const preserve = payload.__preserve || {};
+        const warehouseId = payload.warehouseId || preserve.warehouseId || settings.activeWarehouseId;
         const warehouse = warehouses.find((w) => w.id === warehouseId) || warehouses[0];
-        const now = new Date().toISOString();
-        const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
-        const syncId = `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const now = preserve.date || new Date().toISOString();
+        const invoiceNumber = preserve.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`;
+        const syncId = preserve.syncId || `sale-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const recipes = await getAllFromStore('recipes').catch(() => []);
         const recipeByProductId = new Map((recipes || []).map((r) => [r.productId || r.mealProductId, r]).filter((x) => x[0]));
         let subtotal = 0, lineDiscountTotal = 0, taxTotal = 0;
-        const productCopies = products.map(p => ({...p, fifoBatches: Array.isArray(p.fifoBatches) ? p.fifoBatches.map(b=>({...b})) : []}));
+        const productCopies = baseProducts.map(p => ({...p, fifoBatches: Array.isArray(p.fifoBatches) ? p.fifoBatches.map(b=>({...b})) : []}));
         const consumeFifo = (productId, baseQty, fallbackBaseCost) => {
             const p = productCopies.find(x=>x.id===productId);
             if (!p) return baseQty * fallbackBaseCost;
@@ -673,18 +664,21 @@ export const AppProvider = ({ children }) => {
         const rawDiscount = Number(payload.invoiceDiscountValue ?? invoiceDiscountValue)||0;
         const invoiceDiscountAmount = effectiveDiscountType === 'percent' ? Math.min(beforeInvoiceDiscount, beforeInvoiceDiscount*Math.max(0,Math.min(100,rawDiscount))/100) : Math.min(beforeInvoiceDiscount,Math.max(0,rawDiscount));
         const discountTotal = lineDiscountTotal + invoiceDiscountAmount;
-        const rawGrandTotal = Math.max(0, beforeInvoiceDiscount - invoiceDiscountAmount);
+        const shippingCost = Math.max(0, Number(payload.shippingCost) || 0);
+        const shippingChargeMode = payload.shippingChargeMode === 'profit' ? 'profit' : 'customer';
+        const shippingCustomerAmount = shippingChargeMode === 'customer' ? shippingCost : 0;
+        const rawGrandTotal = Math.max(0, beforeInvoiceDiscount - invoiceDiscountAmount + shippingCustomerAmount);
         const grandTotal = settings.scaleModeEnabled ? Math.round(rawGrandTotal) : rawGrandTotal;
         const roundingAdjustment = grandTotal - rawGrandTotal;
         const payments = Array.isArray(payload.payments) ? payload.payments.filter(p => p && Number(p.amount) > 0 && p.accountId) : [];
         let paid = Number(payload.paidAmount)||0;
         const remaining = Math.max(0, grandTotal - paid);
         const change = Math.max(0, paid - grandTotal);
-        const saleCustomer = payload.forceCashCustomer ? CASH_CUSTOMER : (payload.customerObject || (payload.customerId ? (customers.find((c) => c.id === payload.customerId) || selectedCustomer || CASH_CUSTOMER) : (selectedCustomer || CASH_CUSTOMER)));
+        const saleCustomer = (payload.forceCashCustomer || payload.customerId === CASH_CUSTOMER.id) ? CASH_CUSTOMER : (payload.customerObject || (payload.customerId ? (baseCustomers.find((c) => c.id === payload.customerId) || CASH_CUSTOMER) : (selectedCustomer || CASH_CUSTOMER)));
         if ((payload.paymentType === 'debt' || payload.paymentType === 'partial') && saleCustomer.id === CASH_CUSTOMER.id) { showToast('يجب اختيار عميل مسجل للبيع الآجل أو الدفع الجزئي!', 'error'); return null; }
-        const invoice = { id:'inv-'+Date.now(), invoiceNumber, type:'sale', date:now, customerId:saleCustomer.id, customerName:saleCustomer.name, customerPhone:saleCustomer.phone||'', cashierId:currentUser.id, cashierName:currentUser.name, shiftId:activeShift?.id, branchId:settings.activeBranchName, warehouseId, items:invoiceItems, subtotal, lineDiscountTotal, invoiceDiscountType:effectiveDiscountType, invoiceDiscountValue:rawDiscount, invoiceDiscountAmount, discountTotal, taxTotal, roundingAdjustment, grandTotal, paidAmount:Math.min(paid,grandTotal), remainingAmount:remaining, changeAmount:change, paymentType:payload.paymentType, payments, status:'completed', notes:payload.notes, syncId, isSynced:false, createdAt:now };
+        const invoice = { id:preserve.id||('inv-'+Date.now()), invoiceNumber, type:'sale', date:now, customerId:saleCustomer.id, customerName:saleCustomer.name, customerPhone:saleCustomer.phone||'', cashierId:currentUser.id, cashierName:currentUser.name, shiftId:preserve.shiftId||baseActiveShift?.id, branchId:settings.activeBranchName, warehouseId, items:invoiceItems, subtotal, lineDiscountTotal, invoiceDiscountType:effectiveDiscountType, invoiceDiscountValue:rawDiscount, invoiceDiscountAmount, discountTotal, taxTotal, shippingCost, shippingChargeMode, shippingCustomerAmount, shippingProfitCost:shippingChargeMode==='profit'?shippingCost:0, roundingAdjustment, grandTotal, paidAmount:Math.min(paid,grandTotal), remainingAmount:remaining, changeAmount:change, paymentType:payload.paymentType, payments, status:'completed', notes:payload.notes, syncId, isSynced:false, createdAt:preserve.createdAt||now, updatedAt:payload.__preserve ? new Date().toISOString() : undefined };
         await putInStore('invoices', invoice);
-        const updatedStockList=[...stock], newMovements=[];
+        const updatedStockList=[...baseStock], newMovements=[];
         const deductStock = (productId, productName, baseQty, movementMeta = {}) => {
             const stockIndex=updatedStockList.findIndex(s=>s.productId===productId&&s.warehouseId===warehouseId);
             const currentQty=stockIndex>=0?Number(updatedStockList[stockIndex].baseQuantity)||0:0;
@@ -709,13 +703,13 @@ export const AppProvider = ({ children }) => {
                 deductStock(item.productId, item.productName, item.baseQuantity, {type:'sale',unitName:item.unitName,quantityInUnit:item.quantity,conversionFactor:item.conversionFactor});
             }
         }
-        await bulkPut('stock',updatedStockList); await bulkPut('stock_movements',newMovements); await bulkPut('products',productCopies);
-        const updatedAccounts=[...accounts];
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: newMovements, productRows: productCopies });
+        const updatedAccounts=[...baseAccounts];
         for(const p of payments){const i=updatedAccounts.findIndex(a=>a.id===p.accountId);if(i>=0)updatedAccounts[i]={...updatedAccounts[i],balance:(Number(updatedAccounts[i].balance)||0)+(Number(p.amount)||0)};}
         await bulkPut('accounts',updatedAccounts);
         let updatedCustomer = null, customerStatement = null, updatedShift = null;
         if(remaining>0&&saleCustomer.id!==CASH_CUSTOMER.id){const newBalance=(Number(saleCustomer.balance)||0)+remaining;updatedCustomer={...saleCustomer,balance:newBalance};customerStatement={id:'stmt-'+Date.now(),date:now,type:'sale',referenceNumber:invoiceNumber,description:`فاتورة مبيعات آجل رقم ${invoiceNumber}`,debit:remaining,credit:0,runningBalance:newBalance};await putInStore('customers',updatedCustomer);await putInStore('partner_statements',customerStatement);}
-        if(activeShift){const cashPaid=payments.filter(p=>p.method==='cash').reduce((x,p)=>x+(Number(p.amount)||0),0)-change;const otherPaid=payments.filter(p=>p.method!=='cash').reduce((x,p)=>x+(Number(p.amount)||0),0);updatedShift={...activeShift,totalCashSales:(Number(activeShift.totalCashSales)||0)+Math.max(0,cashPaid),totalOtherSales:(Number(activeShift.totalOtherSales)||0)+otherPaid,expectedCash:(Number(activeShift.expectedCash)||0)+Math.max(0,cashPaid)};await putInStore('shifts',updatedShift);}
+        if(baseActiveShift){const cashPaid=payments.filter(p=>p.method==='cash').reduce((x,p)=>x+(Number(p.amount)||0),0)-change;const otherPaid=payments.filter(p=>p.method!=='cash').reduce((x,p)=>x+(Number(p.amount)||0),0);updatedShift={...baseActiveShift,totalCashSales:(Number(baseActiveShift.totalCashSales)||0)+Math.max(0,cashPaid),totalOtherSales:(Number(baseActiveShift.totalOtherSales)||0)+otherPaid,expectedCash:(Number(baseActiveShift.expectedCash)||0)+Math.max(0,cashPaid)};await putInStore('shifts',updatedShift);}
         // Update the open screen from the already-saved local data; no full database reload and no cloud wait.
         setInvoices(prev => [invoice, ...prev.filter(x => x.id !== invoice.id)]);
         setStock(updatedStockList);
@@ -726,7 +720,7 @@ export const AppProvider = ({ children }) => {
         if(customerStatement)setPartnerStatements(prev => [customerStatement, ...prev]);
         if(updatedShift)setShifts(prev => prev.map(x => x.id===updatedShift.id?updatedShift:x));
         setSyncQueue(window.OscarCloudSync?.pendingItems?.() || []);
-        playSuccessSound(settings.scannerBeepEnabled); if(!isDirectSale) clearCart(); showToast(`تم حفظ الفاتورة بنجاح [${invoiceNumber}]`,'success'); return invoice;
+        if(!payload.__silent){playSuccessSound(settings.scannerBeepEnabled); if(!isDirectSale) clearCart(); showToast(`تم حفظ الفاتورة بنجاح [${invoiceNumber}]`,'success');} return invoice;
     }, [cart, invoiceDiscountType, invoiceDiscountValue, settings, warehouses, products, customers, selectedCustomer, currentUser, activeShift, stock, accounts, clearCart, showToast]);
     // Create Return Invoice
     const createReturnInvoice = useCallback(async (payload) => {
@@ -842,8 +836,7 @@ export const AppProvider = ({ children }) => {
                 userName: currentUser.name,
             });
         }
-        await bulkPut('stock', updatedStockList);
-        await bulkPut('stock_movements', newMovements);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: newMovements });
         // Financial refund: either credit the registered customer's balance or pay from a selected account.
         if (refundMode === 'customer_balance') {
             const cust = customers.find((c) => c.id === original.customerId);
@@ -872,33 +865,164 @@ export const AppProvider = ({ children }) => {
     }, [invoices, products, customers, currentUser, activeShift, accounts, stock, warehouses, reloadData, showToast]);
     // Create Purchase Invoice (local-first: durable local save first, cloud sync later)
     const createPurchaseInvoice = useCallback(async (payload) => {
-        const now=new Date().toISOString(); const purchaseDate=payload?.date ? new Date(`${String(payload.date).slice(0,10)}T12:00:00`).toISOString() : now; const invoiceNumber=`PUR-${Date.now().toString().slice(-6)}`; const syncId=`pur-${Date.now()}`;
-        const targetWarehouse = warehouses.find(w=>w.id===payload?.warehouseId) || warehouses.find(w=>w.id===settings.activeWarehouseId) || warehouses.find(w=>w.isDefault) || warehouses.find(w=>/صالة\s*العرض/.test(String(w.name||''))) || warehouses[0];
-        if(!targetWarehouse) throw new Error('لا يوجد مخزن رئيسي. أضف صالة العرض من المخازن أولاً.');
-        const warehouseId=targetWarehouse.id;
-        const items=Array.isArray(payload?.items)?payload.items.filter(i=>i?.productId&&Number(i.quantity)>0):[];
-        if(!items.length) throw new Error('أضف صنفاً واحداً على الأقل إلى فاتورة المشتريات.');
-        const payments=Array.isArray(payload?.payments)?payload.payments.filter(p=>p&&p.accountId&&Number(p.amount)>0):[];
-        const subtotal=items.reduce((x,i)=>x+(Number(i.total)||0),0);
-        const discountTotal=Math.max(0,Math.min(subtotal,Number(payload.discountAmount)||0));
-        const grandTotal=Math.max(0,subtotal-discountTotal); const paidAmount=Math.min(grandTotal,Math.max(0,Number(payload.paidAmount)||0)); const remaining=Math.max(0,grandTotal-paidAmount); const ratio=subtotal>0?grandTotal/subtotal:1;
-        const purchaseInvoice={id:'pur-'+Date.now(),invoiceNumber,supplierInvoiceNumber:payload.supplierInvoiceNumber||'',date:purchaseDate,supplierId:payload.supplierId,supplierName:payload.supplierName,warehouseId,warehouseName:targetWarehouse.name||'صالة العرض',items:items.map((it,idx)=>({id:`pur-it-${Date.now()}-${idx}`,...it})),subtotal,discountType:payload.discountType||'fixed',discountValue:Number(payload.discountValue)||0,discountTotal,taxTotal:0,grandTotal,paidAmount,remainingAmount:remaining,paymentType:payload.paymentType,payments,notes:payload.notes||'',syncId,isSynced:false,createdAt:now};
-        await putInStore('purchases',purchaseInvoice);
-        const updatedProducts=products.map(p=>({...p,fifoBatches:Array.isArray(p.fifoBatches)?p.fifoBatches.map(b=>({...b})):[]})); const updatedStockList=[...stock],newMovements=[];
-        for(const item of items){const pi=updatedProducts.findIndex(p=>p.id===item.productId);const si=updatedStockList.findIndex(x=>x.productId===item.productId&&x.warehouseId===warehouseId);const currentBaseStock=si>=0?Number(updatedStockList[si].baseQuantity)||0:0;const currentTotalBaseStock=updatedStockList.filter(x=>x.productId===item.productId).reduce((sum,row)=>sum+Math.max(0,Number(row.baseQuantity)||0),0);const baseQty=Math.max(0,Number(item.baseQuantity)||0);const newBaseStock=currentBaseStock+baseQty;
-          if(pi>=0){const currentCost=Number(updatedProducts[pi].costPrice)||0;const unitCost=((Number(item.unitPrice)||0)*ratio)/Math.max(0.00000001,(Number(item.conversionFactor)||1));let batches=updatedProducts[pi].fifoBatches||[];if(currentBaseStock>0&&!batches.some(b=>(b.warehouseId===warehouseId||!b.warehouseId)&&Number(b.remainingBaseQty)>0)){batches.push({id:`legacy-${item.productId}-${warehouseId}`,purchaseId:'legacy',warehouseId,receivedAt:'2000-01-01T00:00:00.000Z',expiryDate:updatedProducts[pi].expiryDate||'',unitCost:currentCost,remainingBaseQty:currentBaseStock});}batches.push({id:`batch-${purchaseInvoice.id}-${item.productId}-${Math.random().toString(36).slice(2,6)}`,purchaseId:purchaseInvoice.id,warehouseId,receivedAt:purchaseDate,expiryDate:item.expiryDate||updatedProducts[pi].expiryDate||'',unitCost,remainingBaseQty:baseQty});/* Weighted average: ((old qty × old avg cost) + (new qty × new base-unit cost)) ÷ (old qty + new qty). Invoice discount is proportionally included in unitCost via ratio. */const oldVal=Math.max(0,currentTotalBaseStock)*currentCost,newVal=baseQty*unitCost,totalUnits=Math.max(0,currentTotalBaseStock)+baseQty,newWAC=totalUnits>0?(oldVal+newVal)/totalUnits:unitCost;updatedProducts[pi]={...updatedProducts[pi],costPrice:parseFloat(newWAC.toFixed(4)),fifoBatches:batches,updatedAt:now};}
-          if(si>=0)updatedStockList[si]={...updatedStockList[si],baseQuantity:newBaseStock};else updatedStockList.push({productId:item.productId,warehouseId,baseQuantity:newBaseStock});
-          newMovements.push({id:'mov-'+Math.random().toString(36).substring(2,9),date:purchaseDate,productId:item.productId,productName:item.productName,warehouseId,warehouseName:targetWarehouse.name||'صالة العرض',type:'purchase',unitName:item.unitName,quantityInUnit:item.quantity,conversionFactor:item.conversionFactor,baseQuantityChange:baseQty,newBaseBalance:newBaseStock,referenceId:purchaseInvoice.id,referenceType:'PURCHASE',userId:currentUser.id,userName:currentUser.name});}
-        await bulkPut('products',updatedProducts);await bulkPut('stock',updatedStockList);await bulkPut('stock_movements',newMovements);
-        const updatedAccounts=[...accounts];for(const pay of payments){const ai=updatedAccounts.findIndex(a=>a.id===pay.accountId);if(ai>=0)updatedAccounts[ai]={...updatedAccounts[ai],balance:(Number(updatedAccounts[ai].balance)||0)-(Number(pay.amount)||0)};}await bulkPut('accounts',updatedAccounts);
-        let updatedSupplier=null,supplierStatement=null;
-        if(remaining>0){const supp=suppliers.find(s=>s.id===payload.supplierId) || (payload.supplierObject?.id===payload.supplierId ? payload.supplierObject : null);if(supp){const nb=(Number(supp.balance)||0)+remaining;updatedSupplier={...supp,balance:nb};supplierStatement={id:'stmt-'+Date.now(),date:purchaseDate,type:'purchase',partyType:'supplier',partyId:supp.id,referenceNumber:invoiceNumber,description:`فاتورة مشتريات رقم ${invoiceNumber}`,debit:0,credit:remaining,runningBalance:nb};await putInStore('suppliers',updatedSupplier);await putInStore('partner_statements',supplierStatement);}}
-        setPurchases(prev => [purchaseInvoice, ...prev.filter(x=>x.id!==purchaseInvoice.id)]);
-        setProducts(updatedProducts);setStock(updatedStockList);setStockMovements(prev=>[...newMovements,...prev]);setAccounts(updatedAccounts);
-        if(updatedSupplier)setSuppliers(prev=>prev.some(x=>x.id===updatedSupplier.id)?prev.map(x=>x.id===updatedSupplier.id?updatedSupplier:x):[updatedSupplier,...prev]);if(supplierStatement)setPartnerStatements(prev=>[supplierStatement,...prev]);
+        const baseProducts = Array.isArray(payload?.__baseProducts) ? payload.__baseProducts : products;
+        const baseStock = Array.isArray(payload?.__baseStock) ? payload.__baseStock : stock;
+        const baseAccounts = Array.isArray(payload?.__baseAccounts) ? payload.__baseAccounts : accounts;
+        const baseSuppliers = Array.isArray(payload?.__baseSuppliers) ? payload.__baseSuppliers : suppliers;
+        const preserve = payload?.__preserve || {};
+        const generatedNow = new Date().toISOString();
+        const now = preserve.createdAt || generatedNow;
+        const purchaseDate = payload?.date ? new Date(`${String(payload.date).slice(0, 10)}T12:00:00`).toISOString() : (preserve.date || generatedNow);
+        const invoiceNumber = preserve.invoiceNumber || `PUR-${Date.now().toString().slice(-6)}`;
+        const syncId = preserve.syncId || `pur-${Date.now()}`;
+        const targetWarehouse = warehouses.find(w => w.id === (payload?.warehouseId || preserve.warehouseId))
+            || warehouses.find(w => w.id === settings.activeWarehouseId)
+            || warehouses.find(w => w.isDefault)
+            || warehouses.find(w => /صالة\s*العرض/.test(String(w.name || '')))
+            || warehouses[0];
+        if (!targetWarehouse) throw new Error('لا يوجد مخزن رئيسي. أضف صالة العرض من المخازن أولاً.');
+        const warehouseId = targetWarehouse.id;
+        const items = Array.isArray(payload?.items) ? payload.items.filter(i => i?.productId && Number(i.quantity) > 0) : [];
+        if (!items.length) throw new Error('أضف صنفاً واحداً على الأقل إلى فاتورة المشتريات.');
+
+        const subtotal = items.reduce((x, i) => x + (Number(i.total) || 0), 0);
+        const discountTotal = Math.max(0, Math.min(subtotal, Number(payload.discountAmount) || 0));
+        const grandTotal = Math.max(0, subtotal - discountTotal); // صافي البضاعة المستحقة للمورد فقط
+        const shippingExpense = Math.max(0, Number(payload.shippingExpense) || 0);
+        const totalWithShipping = grandTotal + shippingExpense;
+        const requestedPaid = Math.max(0, Number(payload.paidAmount) || 0);
+        // مصروف الشحن مدفوع ضمن التدفق النقدي للفاتورة، لذلك لا يقل المدفوع الفعلي عنه.
+        const paidAmount = Math.min(totalWithShipping, Math.max(shippingExpense, requestedPaid));
+        const requestedSupplierPaid = Number(payload.supplierPaidAmount);
+        const supplierPaidAmount = Math.min(grandTotal, Math.max(0,
+            Number.isFinite(requestedSupplierPaid) ? requestedSupplierPaid : (paidAmount - shippingExpense)
+        ));
+        const remaining = Math.max(0, grandTotal - supplierPaidAmount);
+        const ratio = subtotal > 0 ? grandTotal / subtotal : 1;
+        const payments = Array.isArray(payload?.payments) ? payload.payments.filter(p => p && p.accountId && Number(p.amount) > 0) : [];
+
+        const purchaseInvoice = {
+            id: preserve.id || ('pur-' + Date.now()),
+            invoiceNumber,
+            supplierInvoiceNumber: payload.supplierInvoiceNumber || '',
+            date: purchaseDate,
+            supplierId: payload.supplierId,
+            supplierName: payload.supplierName,
+            warehouseId,
+            warehouseName: targetWarehouse.name || 'صالة العرض',
+            items: items.map((it, idx) => ({ id: `pur-it-${Date.now()}-${idx}`, ...it })),
+            subtotal,
+            discountType: payload.discountType || 'fixed',
+            discountValue: Number(payload.discountValue) || 0,
+            discountTotal,
+            taxTotal: 0,
+            grandTotal,
+            shippingExpense,
+            totalWithShipping,
+            paidAmount,
+            supplierPaidAmount,
+            remainingAmount: remaining,
+            paymentType: payload.paymentType,
+            payments,
+            notes: payload.notes || '',
+            syncId,
+            isSynced: false,
+            createdAt: now,
+            updatedAt: payload?.__preserve ? generatedNow : undefined,
+        };
+        await putInStore('purchases', purchaseInvoice);
+
+        const updatedProducts = baseProducts.map(p => ({ ...p, fifoBatches: Array.isArray(p.fifoBatches) ? p.fifoBatches.map(b => ({ ...b })) : [] }));
+        const updatedStockList = [...baseStock];
+        const newMovements = [];
+        for (const item of items) {
+            const pi = updatedProducts.findIndex(p => p.id === item.productId);
+            const si = updatedStockList.findIndex(x => x.productId === item.productId && x.warehouseId === warehouseId);
+            const currentBaseStock = si >= 0 ? Number(updatedStockList[si].baseQuantity) || 0 : 0;
+            const currentTotalBaseStock = updatedStockList.filter(x => x.productId === item.productId).reduce((sum, row) => sum + Math.max(0, Number(row.baseQuantity) || 0), 0);
+            const baseQty = Math.max(0, Number(item.baseQuantity) || 0);
+            const newBaseStock = currentBaseStock + baseQty;
+            if (pi >= 0) {
+                const currentCost = Number(updatedProducts[pi].costPrice) || 0;
+                // الشحن مصروف تشغيلي حسب طلب المستخدم ولا يدخل في متوسط تكلفة المخزون.
+                const unitCost = ((Number(item.unitPrice) || 0) * ratio) / Math.max(0.00000001, (Number(item.conversionFactor) || 1));
+                let batches = updatedProducts[pi].fifoBatches || [];
+                if (currentBaseStock > 0 && !batches.some(b => (b.warehouseId === warehouseId || !b.warehouseId) && Number(b.remainingBaseQty) > 0)) {
+                    batches.push({ id: `legacy-${item.productId}-${warehouseId}`, purchaseId: 'legacy', warehouseId, receivedAt: '2000-01-01T00:00:00.000Z', expiryDate: updatedProducts[pi].expiryDate || '', unitCost: currentCost, remainingBaseQty: currentBaseStock });
+                }
+                batches.push({ id: `batch-${purchaseInvoice.id}-${item.productId}-${Math.random().toString(36).slice(2, 6)}`, purchaseId: purchaseInvoice.id, warehouseId, receivedAt: purchaseDate, expiryDate: item.expiryDate || updatedProducts[pi].expiryDate || '', unitCost, remainingBaseQty: baseQty });
+                const oldVal = Math.max(0, currentTotalBaseStock) * currentCost;
+                const newVal = baseQty * unitCost;
+                const totalUnits = Math.max(0, currentTotalBaseStock) + baseQty;
+                const newWAC = totalUnits > 0 ? (oldVal + newVal) / totalUnits : unitCost;
+                updatedProducts[pi] = { ...updatedProducts[pi], costPrice: parseFloat(newWAC.toFixed(4)), fifoBatches: batches, updatedAt: now };
+            }
+            if (si >= 0) updatedStockList[si] = { ...updatedStockList[si], baseQuantity: newBaseStock };
+            else updatedStockList.push({ productId: item.productId, warehouseId, baseQuantity: newBaseStock });
+            newMovements.push({ id: 'mov-' + Math.random().toString(36).substring(2, 9), date: purchaseDate, productId: item.productId, productName: item.productName, warehouseId, warehouseName: targetWarehouse.name || 'صالة العرض', type: 'purchase', unitName: item.unitName, quantityInUnit: item.quantity, conversionFactor: item.conversionFactor, baseQuantityChange: baseQty, newBaseBalance: newBaseStock, referenceId: purchaseInvoice.id, referenceType: 'PURCHASE', userId: currentUser.id, userName: currentUser.name });
+        }
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: newMovements, productRows: updatedProducts });
+
+        // الحساب المالي يُخصم منه كامل ما دُفع فعلياً: ثمن البضاعة + مصروف الشحن.
+        const updatedAccounts = [...baseAccounts];
+        for (const pay of payments) {
+            const ai = updatedAccounts.findIndex(a => a.id === pay.accountId);
+            if (ai >= 0) updatedAccounts[ai] = { ...updatedAccounts[ai], balance: (Number(updatedAccounts[ai].balance) || 0) - (Number(pay.amount) || 0) };
+        }
+        await bulkPut('accounts', updatedAccounts);
+
+        // الشحن يظهر كسجل مصروف مستقل كي يُخصم تلقائياً من صافي الأرباح، دون خصم الحساب مرتين.
+        let shippingExpenseRecord = null;
+        if (shippingExpense > 0) {
+            const pay = payments[0];
+            const expenseAccount = updatedAccounts.find(a => a.id === pay?.accountId) || baseAccounts.find(a => a.id === pay?.accountId) || null;
+            shippingExpenseRecord = {
+                id: `exp-purchase-shipping-${purchaseInvoice.id}`,
+                date: purchaseDate,
+                category: 'نقل وشحن',
+                amount: shippingExpense,
+                accountId: expenseAccount?.id || pay?.accountId || null,
+                accountName: expenseAccount?.name || pay?.accountName || 'ضمن دفعة فاتورة المشتريات',
+                notes: `مصروف شحن تلقائي لفاتورة مشتريات ${invoiceNumber}${payload.supplierName ? ` - ${payload.supplierName}` : ''}`,
+                userId: currentUser.id,
+                userName: currentUser.name,
+                createdAt: generatedNow,
+                linkedPurchaseId: purchaseInvoice.id,
+                referenceType: 'PURCHASE_SHIPPING',
+                referenceNumber: invoiceNumber,
+                automatic: true,
+                accountImpactHandled: true,
+                deletedAt: null,
+            };
+            await putInStore('expenses', shippingExpenseRecord);
+        }
+
+        let updatedSupplier = null, supplierStatement = null;
+        if (remaining > 0) {
+            const supp = baseSuppliers.find(s => s.id === payload.supplierId) || (payload.supplierObject?.id === payload.supplierId ? payload.supplierObject : null);
+            if (supp) {
+                const nb = (Number(supp.balance) || 0) + remaining;
+                updatedSupplier = { ...supp, balance: nb };
+                supplierStatement = { id: 'stmt-' + Date.now(), date: purchaseDate, type: 'purchase', partyType: 'supplier', partyId: supp.id, referenceNumber: invoiceNumber, description: `فاتورة مشتريات رقم ${invoiceNumber}`, debit: 0, credit: remaining, runningBalance: nb };
+                await putInStore('suppliers', updatedSupplier);
+                await putInStore('partner_statements', supplierStatement);
+            }
+        }
+        setPurchases(prev => [purchaseInvoice, ...prev.filter(x => x.id !== purchaseInvoice.id)]);
+        setProducts(updatedProducts);
+        setStock(updatedStockList);
+        setStockMovements(prev => [...newMovements, ...prev]);
+        setAccounts(updatedAccounts);
+        if (shippingExpenseRecord) setExpenses(prev => [shippingExpenseRecord, ...prev.filter(x => x.id !== shippingExpenseRecord.id)]);
+        if (updatedSupplier) setSuppliers(prev => prev.some(x => x.id === updatedSupplier.id) ? prev.map(x => x.id === updatedSupplier.id ? updatedSupplier : x) : [updatedSupplier, ...prev]);
+        if (supplierStatement) setPartnerStatements(prev => [supplierStatement, ...prev]);
         setSyncQueue(window.OscarCloudSync?.pendingItems?.() || []);
-        playSuccessSound(settings.scannerBeepEnabled);showToast(`تم تسجيل فاتورة الشراء بنجاح [${invoiceNumber}]`,'success');return purchaseInvoice;
-    }, [warehouses,products,stock,accounts,suppliers,currentUser,showToast,settings.activeWarehouseId,settings.scannerBeepEnabled]);
+        if (!payload?.__silent) {
+            playSuccessSound(settings.scannerBeepEnabled);
+            showToast(`تم تسجيل فاتورة الشراء بنجاح [${invoiceNumber}]${shippingExpense > 0 ? ' وتسجيل مصروف الشحن تلقائياً' : ''}`, 'success');
+        }
+        return purchaseInvoice;
+    }, [warehouses, products, stock, accounts, suppliers, currentUser, showToast, settings.activeWarehouseId, settings.scannerBeepEnabled]);
 
     // Damaged/expired stock: deduct quantity and exact FIFO cost as a loss expense.
     const recordDamagedStock = useCallback(async (productId, warehouseId, baseQuantity, reason='تالف / منتهي الصلاحية') => {
@@ -906,7 +1030,9 @@ export const AppProvider = ({ children }) => {
         const current=getProductStock(productId,warehouseId); if(current<=0){showToast('لا يوجد رصيد متاح لهذا الصنف','warning');return false;} const actual=Math.min(current,qty); const now=new Date().toISOString();
         const pcopy={...prod,fifoBatches:Array.isArray(prod.fifoBatches)?prod.fifoBatches.map(b=>({...b})):[]}; let left=actual,cost=0;const batches=pcopy.fifoBatches.filter(b=>(b.warehouseId===warehouseId||!b.warehouseId)&&Number(b.remainingBaseQty)>0).sort((a,b)=>new Date(a.receivedAt||0)-new Date(b.receivedAt||0));for(const b of batches){if(left<=0)break;const take=Math.min(left,Number(b.remainingBaseQty)||0);cost+=take*(Number(b.unitCost)||prod.costPrice||0);b.remainingBaseQty-=take;left-=take;}if(left>0)cost+=left*(Number(prod.costPrice)||0);
         const updatedStock=[...stock];const si=updatedStock.findIndex(x=>x.productId===productId&&x.warehouseId===warehouseId);const newBalance=current-actual;if(si>=0)updatedStock[si]={...updatedStock[si],baseQuantity:newBalance};else updatedStock.push({productId,warehouseId,baseQuantity:newBalance});
-        await putInStore('products',{...pcopy,updatedAt:now});await bulkPut('stock',updatedStock);await putInStore('stock_movements',{id:'mov-damage-'+Date.now(),date:now,productId,productName:prod.name,warehouseId,warehouseName:warehouses.find(w=>w.id===warehouseId)?.name||'المخزن',type:'damage',unitName:prod.baseUnitName,quantityInUnit:actual,conversionFactor:1,baseQuantityChange:-actual,newBaseBalance,referenceType:'DAMAGE',userId:currentUser.id,userName:currentUser.name,notes:reason});await putInStore('expenses',{id:'exp-damage-'+Date.now(),date:now,category:'تالف ومخزون منتهي',amount:parseFloat(cost.toFixed(4)),accountId:null,accountName:'خسارة مخزون',notes:`${reason}: ${prod.name} × ${actual} ${prod.baseUnitName}`,userId:currentUser.id,userName:currentUser.name,createdAt:now,inventoryLoss:true,deletedAt:null});
+        const damageMovement={id:'mov-damage-'+Date.now(),date:now,productId,productName:prod.name,warehouseId,warehouseName:warehouses.find(w=>w.id===warehouseId)?.name||'المخزن',type:'damage',unitName:prod.baseUnitName,quantityInUnit:actual,conversionFactor:1,baseQuantityChange:-actual,newBaseBalance,referenceType:'DAMAGE',userId:currentUser.id,userName:currentUser.name,notes:reason};
+        await commitInventoryTransaction({ stockRows: updatedStock, movementRows: [damageMovement], productRows: [{...pcopy,updatedAt:now}] });
+        await putInStore('expenses',{id:'exp-damage-'+Date.now(),date:now,category:'تالف ومخزون منتهي',amount:parseFloat(cost.toFixed(4)),accountId:null,accountName:'خسارة مخزون',notes:`${reason}: ${prod.name} × ${actual} ${prod.baseUnitName}`,userId:currentUser.id,userName:currentUser.name,createdAt:now,inventoryLoss:true,deletedAt:null});
         await reloadData();showToast(`تم خصم التالف من المخزون وتسجيل خسارة ${cost.toFixed(2)} ${settings.currencySymbol}`,'success');return true;
     },[products,stock,warehouses,currentUser,getProductStock,reloadData,showToast,settings.currencySymbol]);
     // Stock operations
@@ -950,8 +1076,7 @@ export const AppProvider = ({ children }) => {
             userName: currentUser.name,
             notes: reason,
         };
-        await bulkPut('stock', updatedStockList);
-        await putInStore('stock_movements', movement);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: [movement] });
         await reloadData();
         showToast(`تم تعديل رصيد ${prod.name} إلى ${newBaseQty} ${prod.baseUnitName}`, 'info');
     }, [products, getProductStock, stock, warehouses, currentUser, reloadData, showToast]);
@@ -994,9 +1119,7 @@ export const AppProvider = ({ children }) => {
                 notes: reason,
             });
         });
-        await bulkPut('stock', updatedStockList);
-        for (const movement of movements)
-            await putInStore('stock_movements', movement);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: movements });
         await reloadData();
         showToast(`تم اعتماد الجرد وتحديث ${movements.length} صنف بنجاح`, 'success');
     }, [stock, products, warehouses, currentUser, reloadData, showToast]);
@@ -1064,9 +1187,7 @@ export const AppProvider = ({ children }) => {
             userName: currentUser.name,
             notes: `تحويل من ${warehouses.find((w) => w.id === fromWarehouseId)?.name || ''} ${notes ? `(${notes})` : ''}`,
         };
-        await bulkPut('stock', updatedStockList);
-        await putInStore('stock_movements', movOut);
-        await putInStore('stock_movements', movIn);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: [movOut, movIn] });
         await reloadData();
         showToast(`تم تحويل ${quantity} ${unit.name} من ${prod.name} بنجاح`, 'success');
     }, [products, getProductStock, settings.allowNegativeStock, stock, warehouses, currentUser, reloadData, showToast]);
@@ -1125,8 +1246,7 @@ export const AppProvider = ({ children }) => {
                 notes: `تحويل جماعي من ${fromName}${notes ? ` (${notes})` : ''}`,
             });
         }
-        await bulkPut('stock', updatedStockList);
-        await bulkPut('stock_movements', movements);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: movements });
         await reloadData();
         showToast(`تم تحويل ${rows.length} صنف بنجاح`, 'success');
         return true;
@@ -1153,17 +1273,14 @@ export const AppProvider = ({ children }) => {
                 { id: `opening-${product.id}-${Date.now()}`, purchaseId: 'opening-stock', warehouseId, receivedAt: now, expiryDate: product.expiryDate || '', unitCost: baseCost, remainingBaseQty: openingBaseQuantity },
             ];
             if (warehouseId) {
-                await putInStore('stock', { productId: product.id, warehouseId, baseQuantity: openingBaseQuantity });
-                // نحفظ الكمية الافتتاحية حسب كل وحدة بدلاً من دمجها كسطر واحد بالوحدة الأساسية.
                 const openingRows = Array.isArray(product.openingUnitBreakdown) && product.openingUnitBreakdown.length
                     ? product.openingUnitBreakdown
                     : [{ unitId: baseUnit?.id, unitName: baseUnit?.name || product.baseUnitName || 'حبة', quantity: openingBaseQuantity, conversionToBase: 1, baseQuantity: openingBaseQuantity }];
                 let runningBalance = 0;
-                for (let index = 0; index < openingRows.length; index += 1) {
-                    const row = openingRows[index];
+                const openingMovements = openingRows.map((row, index) => {
                     const rowBase = Math.max(0, Number(row.baseQuantity) || (Number(row.quantity) || 0) * (Number(row.conversionToBase) || 1));
                     runningBalance += rowBase;
-                    await putInStore('stock_movements', {
+                    return {
                         id: `mov-opening-${product.id}-${Date.now()}-${index}`,
                         date: now,
                         productId: product.id,
@@ -1182,11 +1299,19 @@ export const AppProvider = ({ children }) => {
                         notes: Number(row.conversionToBase) > 1
                             ? `كمية افتتاحية: ${row.quantity} ${row.unitName} = ${rowBase} ${baseUnit?.name || product.baseUnitName || 'حبة'}`
                             : `كمية افتتاحية: ${row.quantity} ${row.unitName || baseUnit?.name || 'حبة'}`,
-                    });
-                }
+                    };
+                });
+                await commitInventoryTransaction({
+                    stockRows: [{ productId: product.id, warehouseId, baseQuantity: openingBaseQuantity }],
+                    movementRows: openingMovements,
+                    productRows: [cleanProduct],
+                });
+            } else {
+                await putInStore('products', cleanProduct);
             }
+        } else {
+            await putInStore('products', cleanProduct);
         }
-        await putInStore('products', cleanProduct);
         await reloadData();
         showToast(`تم حفظ الصنف: ${cleanProduct.name}`, 'success');
     }, [products, settings.activeWarehouseId, warehouses, currentUser, reloadData, showToast]);
@@ -1435,6 +1560,10 @@ export const AppProvider = ({ children }) => {
         const previous = expenses.find((e) => e.id === nextExpense.id);
         if (!previous)
             return;
+        if (previous.referenceType === 'PURCHASE_SHIPPING' && previous.linkedPurchaseId) {
+            showToast('مصروف الشحن التلقائي يُعدّل من فاتورة المشتريات المرتبطة', 'warning');
+            return;
+        }
         const oldAcc = accounts.find((a) => a.id === previous.accountId);
         const newAcc = accounts.find((a) => a.id === nextExpense.accountId);
         if (!newAcc) {
@@ -1464,6 +1593,10 @@ export const AppProvider = ({ children }) => {
         const exp = expenses.find((e) => e.id === id);
         if (!exp || exp.deletedAt)
             return;
+        if (exp.referenceType === 'PURCHASE_SHIPPING' && exp.linkedPurchaseId) {
+            showToast('مصروف الشحن التلقائي مرتبط بفاتورة مشتريات ويُحذف أو يتغير من الفاتورة نفسها', 'warning');
+            return;
+        }
         const acc = accounts.find((a) => a.id === exp.accountId);
         if (acc)
             await putInStore('accounts', { ...acc, balance: acc.balance + exp.amount });
@@ -1695,16 +1828,14 @@ export const AppProvider = ({ children }) => {
         showToast('تم حذف الموظف بنجاح', 'info');
     }, [reloadData, showToast]);
     // Sales invoice deletion with full stock & financial reversal
-    const deleteInvoice = useCallback(async (id) => {
+    const deleteInvoice = useCallback(async (id, options = {}) => {
         const inv = invoices.find((i) => i.id === id);
-        if (!inv)
-            return;
-        // 1. Revert inventory for each item.
-        // Meals linked to a recipe consume raw ingredients at sale time, so deleting
-        // the invoice must restore those exact ingredients instead of adding a fake
-        // finished-meal quantity back to stock.
+        if (!inv) return null;
         const updatedStockList = [...stock];
-        const addBackToStock = (productId, baseQty) => {
+        const updatedProducts = products.map(p => ({ ...p, fifoBatches: Array.isArray(p.fifoBatches) ? p.fifoBatches.map(b => ({ ...b })) : [] }));
+        const reverseMovements = [];
+        const reversalAt = new Date().toISOString();
+        const addBackToStock = (productId, productName, baseQty, totalCost = 0) => {
             const qty = Math.max(0, Number(baseQty) || 0);
             if (!productId || qty <= 0) return;
             const stockIndex = updatedStockList.findIndex((row) => row.productId === productId && row.warehouseId === inv.warehouseId);
@@ -1712,87 +1843,411 @@ export const AppProvider = ({ children }) => {
             const next = current + qty;
             if (stockIndex >= 0) updatedStockList[stockIndex] = { ...updatedStockList[stockIndex], baseQuantity: next };
             else updatedStockList.push({ productId, warehouseId: inv.warehouseId, baseQuantity: next });
+            const pi = updatedProducts.findIndex(p => p.id === productId);
+            if (pi >= 0) {
+                const unitCost = qty > 0 ? Math.max(0, Number(totalCost) || 0) / qty : Number(updatedProducts[pi].costPrice) || 0;
+                const batches = Array.isArray(updatedProducts[pi].fifoBatches) ? updatedProducts[pi].fifoBatches : [];
+                batches.push({
+                    id: `sale-reversal-batch-${inv.id}-${productId}-${Date.now()}-${batches.length}`,
+                    purchaseId: `sale-reversal-${inv.id}`,
+                    warehouseId: inv.warehouseId,
+                    receivedAt: inv.date || reversalAt,
+                    expiryDate: '',
+                    unitCost: Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : (Number(updatedProducts[pi].costPrice) || 0),
+                    remainingBaseQty: qty,
+                    restoredFromSaleId: inv.id,
+                });
+                updatedProducts[pi] = { ...updatedProducts[pi], fifoBatches: batches, updatedAt: reversalAt };
+            }
+            reverseMovements.push({
+                id: `mov-sale-reversal-${inv.id}-${productId}-${Date.now()}-${reverseMovements.length}`,
+                date: reversalAt,
+                productId,
+                productName: productName || products.find(p => p.id === productId)?.name || '',
+                warehouseId: inv.warehouseId,
+                warehouseName: warehouses.find(w => w.id === inv.warehouseId)?.name || 'المخزن',
+                type: options.internalEdit ? 'sale_edit_reversal' : 'sale_reversal',
+                unitName: products.find(p => p.id === productId)?.baseUnitName || 'وحدة أساسية',
+                quantityInUnit: qty,
+                conversionFactor: 1,
+                baseQuantityChange: qty,
+                newBaseBalance: next,
+                referenceId: inv.id,
+                referenceType: options.internalEdit ? 'INVOICE_EDIT_REVERSAL' : 'INVOICE_DELETE',
+                userId: currentUser.id,
+                userName: currentUser.name,
+            });
         };
-        for (const item of inv.items) {
+        for (const item of (inv.items || [])) {
             if (item.isManufacturedMeal && Array.isArray(item.recipeConsumption) && item.recipeConsumption.length > 0) {
-                for (const ing of item.recipeConsumption) addBackToStock(ing.productId, ing.baseQuantity);
+                for (const ing of item.recipeConsumption) addBackToStock(ing.productId, ing.productName, ing.baseQuantity, ing.fifoCostTotal || 0);
             } else {
-                addBackToStock(item.productId, Number(item.baseQuantity) || (Number(item.quantity) || 0) * (Number(item.conversionFactor) || 1));
+                const baseQty = Number(item.baseQuantity) || (Number(item.quantity) || 0) * (Number(item.conversionFactor) || 1);
+                addBackToStock(item.productId, item.productName, baseQty, item.fifoCostTotal || ((Number(item.costPriceAtSale) || 0) * (Number(item.quantity) || 0)));
             }
         }
-        await bulkPut('stock', updatedStockList);
-        // 2. Revert customer balance if debt/partial
-        if (inv.customerId && inv.remainingAmount > 0) {
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: reverseMovements, productRows: updatedProducts });
+        if (inv.customerId && inv.customerId !== CASH_CUSTOMER.id && Number(inv.remainingAmount) > 0) {
             const cust = customers.find((c) => c.id === inv.customerId);
-            if (cust) {
-                await putInStore('customers', {
-                    ...cust,
-                    balance: Math.max(0, cust.balance - inv.remainingAmount),
+            if (cust) await putInStore('customers', { ...cust, balance: Math.max(0, (Number(cust.balance) || 0) - Number(inv.remainingAmount || 0)) });
+        }
+        if (Array.isArray(inv.payments)) {
+            for (const pay of inv.payments) {
+                const acc = accounts.find((a) => a.id === pay.accountId);
+                if (acc) await putInStore('accounts', { ...acc, balance: (Number(acc.balance) || 0) - (Number(pay.amount) || 0) });
+            }
+        }
+        if (inv.shiftId) {
+            const shift = shifts.find(s => s.id === inv.shiftId);
+            if (shift) {
+                const cashPaid = (inv.payments || []).filter(p => p.method === 'cash').reduce((x, p) => x + (Number(p.amount) || 0), 0) - (Number(inv.changeAmount) || 0);
+                const otherPaid = (inv.payments || []).filter(p => p.method !== 'cash').reduce((x, p) => x + (Number(p.amount) || 0), 0);
+                await putInStore('shifts', {
+                    ...shift,
+                    totalCashSales: Math.max(0, (Number(shift.totalCashSales) || 0) - Math.max(0, cashPaid)),
+                    totalOtherSales: Math.max(0, (Number(shift.totalOtherSales) || 0) - otherPaid),
+                    expectedCash: (Number(shift.expectedCash) || 0) - Math.max(0, cashPaid),
                 });
             }
         }
-        // 3. Revert account balances for cash/card payments
-        if (inv.payments && inv.payments.length > 0) {
-            for (const p of inv.payments) {
-                const acc = accounts.find((a) => a.id === p.accountId);
-                if (acc) {
-                    await putInStore('accounts', {
-                        ...acc,
-                        balance: acc.balance - p.amount,
-                    });
-                }
-            }
-        }
-        // 4. Remove invoice
-        await deleteFromStore('invoices', id);
-        await reloadData();
-        showToast(`تم إلغاء وحذف الفاتورة [${inv.invoiceNumber}] واسترجاع المخزون`, 'info');
-    }, [invoices, stock, customers, accounts, reloadData, showToast]);
-    // Purchase invoice deletion with full stock & financial reversal
-    const deletePurchase = useCallback(async (id) => {
+        const relatedStatements = (partnerStatements || []).filter(st => st && st.type === 'sale' && st.referenceNumber === inv.invoiceNumber);
+        for (const st of relatedStatements) await deleteFromStore('partner_statements', st.id, true);
+        await deleteFromStore('invoices', id, !options.internalEdit);
+        if (!options.skipReload) await reloadData();
+        if (!options.silent) showToast(`تم إلغاء وحذف الفاتورة [${inv.invoiceNumber}] واسترجاع المخزون`, 'info');
+        return inv;
+    }, [invoices, stock, customers, accounts, products, warehouses, currentUser, shifts, partnerStatements, reloadData, showToast]);
+
+    // Purchase invoice deletion with full stock, FIFO & financial reversal
+    const deletePurchase = useCallback(async (id, options = {}) => {
         const pur = purchases.find((p) => p.id === id);
-        if (!pur)
-            return;
-        // 1. Deduct back the added stock
+        if (!pur) return null;
         const updatedStockList = [...stock];
-        for (const item of pur.items) {
-            const baseQtyToDeduct = item.baseQuantity;
-            const stockIndex = updatedStockList.findIndex((s) => s.productId === item.productId && s.warehouseId === pur.warehouseId);
-            if (stockIndex >= 0) {
-                updatedStockList[stockIndex] = {
-                    ...updatedStockList[stockIndex],
-                    baseQuantity: Math.max(0, updatedStockList[stockIndex].baseQuantity - baseQtyToDeduct),
+        const updatedProducts = products.map(p => ({ ...p, fifoBatches: Array.isArray(p.fifoBatches) ? p.fifoBatches.map(b => ({ ...b })) : [] }));
+        const reverseMovements = [];
+        const reversalAt = new Date().toISOString();
+        for (const item of (pur.items || [])) {
+            const baseQtyToDeduct = Math.max(0, Number(item.baseQuantity) || 0);
+            const stockIndex = updatedStockList.findIndex((row) => row.productId === item.productId && row.warehouseId === pur.warehouseId);
+            const current = stockIndex >= 0 ? Number(updatedStockList[stockIndex].baseQuantity) || 0 : 0;
+            const next = Math.max(0, current - baseQtyToDeduct);
+            const delta = next - current;
+            if (stockIndex >= 0) updatedStockList[stockIndex] = { ...updatedStockList[stockIndex], baseQuantity: next };
+            else updatedStockList.push({ productId: item.productId, warehouseId: pur.warehouseId, baseQuantity: next });
+            const pi = updatedProducts.findIndex(p => p.id === item.productId);
+            if (pi >= 0) {
+                const remainingBatches = (updatedProducts[pi].fifoBatches || []).filter(b => b.purchaseId !== pur.id);
+                const positive = remainingBatches.filter(b => Number(b.remainingBaseQty) > 0);
+                const qty = positive.reduce((sum, b) => sum + (Number(b.remainingBaseQty) || 0), 0);
+                const value = positive.reduce((sum, b) => sum + (Number(b.remainingBaseQty) || 0) * (Number(b.unitCost) || 0), 0);
+                updatedProducts[pi] = {
+                    ...updatedProducts[pi],
+                    fifoBatches: remainingBatches,
+                    costPrice: qty > 0 ? parseFloat((value / qty).toFixed(4)) : (Number(updatedProducts[pi].costPrice) || 0),
+                    updatedAt: reversalAt,
                 };
             }
+            if (delta !== 0) reverseMovements.push({
+                id: `mov-purchase-reversal-${pur.id}-${item.productId}-${Date.now()}-${reverseMovements.length}`,
+                date: reversalAt,
+                productId: item.productId,
+                productName: item.productName || products.find(p => p.id === item.productId)?.name || '',
+                warehouseId: pur.warehouseId,
+                warehouseName: warehouses.find(w => w.id === pur.warehouseId)?.name || pur.warehouseName || 'المخزن',
+                type: options.internalEdit ? 'purchase_edit_reversal' : 'purchase_reversal',
+                unitName: item.unitName || products.find(p => p.id === item.productId)?.baseUnitName || 'وحدة أساسية',
+                quantityInUnit: Math.abs(delta),
+                conversionFactor: 1,
+                baseQuantityChange: delta,
+                newBaseBalance: next,
+                referenceId: pur.id,
+                referenceType: options.internalEdit ? 'PURCHASE_EDIT_REVERSAL' : 'PURCHASE_DELETE',
+                userId: currentUser.id,
+                userName: currentUser.name,
+            });
         }
-        await bulkPut('stock', updatedStockList);
-        // 2. Revert supplier balance
-        if (pur.supplierId && pur.remainingAmount > 0) {
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: reverseMovements, productRows: updatedProducts });
+        if (pur.supplierId && Number(pur.remainingAmount) > 0) {
             const supp = suppliers.find((s) => s.id === pur.supplierId);
-            if (supp) {
-                await putInStore('suppliers', {
-                    ...supp,
-                    balance: Math.max(0, supp.balance - pur.remainingAmount),
+            if (supp) await putInStore('suppliers', { ...supp, balance: Math.max(0, (Number(supp.balance) || 0) - Number(pur.remainingAmount || 0)) });
+        }
+        if (Array.isArray(pur.payments)) {
+            for (const pay of pur.payments) {
+                const acc = accounts.find((a) => a.id === pay.accountId);
+                if (acc) await putInStore('accounts', { ...acc, balance: (Number(acc.balance) || 0) + (Number(pay.amount) || 0) });
+            }
+        }
+        const relatedStatements = (partnerStatements || []).filter(st => st && st.type === 'purchase' && st.referenceNumber === pur.invoiceNumber);
+        for (const st of relatedStatements) await deleteFromStore('partner_statements', st.id, true);
+        // مصروف الشحن المرتبط جزء من الفاتورة: يُحذف معها. أثر الحساب يُعكس من payments أعلاه فقط لتجنب الازدواج.
+        const expenseRows = await getAllFromStore('expenses').catch(() => []);
+        const linkedShippingExpenses = (expenseRows || []).filter(exp => exp && (exp.linkedPurchaseId === pur.id || (exp.referenceType === 'PURCHASE_SHIPPING' && exp.referenceNumber === pur.invoiceNumber)));
+        for (const exp of linkedShippingExpenses) await deleteFromStore('expenses', exp.id, true);
+        await deleteFromStore('purchases', id, !options.internalEdit);
+        if (!options.skipReload) await reloadData();
+        if (!options.silent) showToast(`تم حذف فاتورة الشراء [${pur.invoiceNumber}] بنجاح`, 'info');
+        return pur;
+    }, [purchases, stock, suppliers, accounts, products, warehouses, currentUser, partnerStatements, reloadData, showToast]);
+
+    const updateSaleInvoice = useCallback(async (id, payload = {}) => {
+        const oldInvoice = invoices.find(inv => inv.id === id && inv.type === 'sale');
+        if (!oldInvoice) throw new Error('فاتورة المبيعات غير موجودة');
+        if (invoices.some(inv => inv.type === 'return' && inv.originalInvoiceId === id)) throw new Error('لا يمكن تعديل فاتورة مبيعات مرتبطة بمرتجع. ألغِ المرتجع أولاً للحفاظ على صحة المخزون والحسابات.');
+        const items = Array.isArray(payload.items) ? payload.items.filter(i => i?.productId && Number(i.quantity) > 0) : [];
+        if (!items.length) throw new Error('يجب أن تحتوي الفاتورة على صنف واحد على الأقل');
+        await deleteInvoice(id, { silent: true, skipReload: true, internalEdit: true });
+        const [freshProducts, freshStock, freshAccounts, freshCustomers, freshShifts] = await Promise.all([
+            getAllFromStore('products'), getCanonicalStockSnapshot({ repair: true }), getAllFromStore('accounts'), getAllFromStore('customers'), getAllFromStore('shifts')
+        ]);
+        const baseShift = oldInvoice.shiftId ? (freshShifts || []).find(s => s.id === oldInvoice.shiftId) || null : null;
+        const result = await createSaleInvoice({
+            ...payload,
+            items,
+            warehouseId: oldInvoice.warehouseId,
+            __baseProducts: freshProducts || [],
+            __baseStock: freshStock || [],
+            __baseAccounts: freshAccounts || [],
+            __baseCustomers: freshCustomers || [],
+            __baseActiveShift: baseShift,
+            __preserve: { id: oldInvoice.id, invoiceNumber: oldInvoice.invoiceNumber, date: oldInvoice.date, createdAt: oldInvoice.createdAt, syncId: oldInvoice.syncId, shiftId: oldInvoice.shiftId, warehouseId: oldInvoice.warehouseId },
+            __silent: true,
+        });
+        if (!result) throw new Error('تعذر إعادة إنشاء الفاتورة بعد التعديل');
+        await reloadData();
+        showToast(`تم تعديل فاتورة المبيعات [${oldInvoice.invoiceNumber}] وإعادة حساب المخزون والحسابات`, 'success');
+        return result;
+    }, [invoices, deleteInvoice, createSaleInvoice, reloadData, showToast]);
+
+    const updatePurchaseInvoice = useCallback(async (id, payload = {}) => {
+        const oldPurchase = purchases.find(p => p.id === id);
+        if (!oldPurchase) throw new Error('فاتورة المشتريات غير موجودة');
+        const items = Array.isArray(payload.items) ? payload.items.filter(i => i?.productId && Number(i.quantity) > 0) : [];
+        if (!items.length) throw new Error('يجب أن تحتوي فاتورة المشتريات على صنف واحد على الأقل');
+        const warehouseId = payload.warehouseId || oldPurchase.warehouseId;
+        if (warehouseId !== oldPurchase.warehouseId) {
+            throw new Error('للحفاظ على حركة المخزون السابقة لا يمكن تغيير مخزن فاتورة شراء محفوظة. عدّل الأصناف والكميات والأسعار وباقي البيانات مع إبقاء المخزن نفسه.');
+        }
+        const targetWarehouse = warehouses.find(w => w.id === warehouseId);
+        if (!targetWarehouse) throw new Error('مخزن فاتورة المشتريات غير موجود');
+
+        const generatedNow = new Date().toISOString();
+        const purchaseDate = payload?.date ? new Date(`${String(payload.date).slice(0,10)}T12:00:00`).toISOString() : (oldPurchase.date || generatedNow);
+        const subtotal = items.reduce((sum, item) => sum + (Number(item.total) || ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))), 0);
+        const discountTotal = Math.max(0, Math.min(subtotal, Number(payload.discountAmount) || 0));
+        const grandTotal = Math.max(0, subtotal - discountTotal);
+        const shippingExpense = Math.max(0, Number(payload.shippingExpense) || 0);
+        const totalWithShipping = grandTotal + shippingExpense;
+        const paidAmount = Math.min(totalWithShipping, Math.max(shippingExpense, Math.max(0, Number(payload.paidAmount) || 0)));
+        const requestedSupplierPaid = Number(payload.supplierPaidAmount);
+        const supplierPaidAmount = Math.min(grandTotal, Math.max(0, Number.isFinite(requestedSupplierPaid) ? requestedSupplierPaid : (paidAmount - shippingExpense)));
+        const remainingAmount = Math.max(0, grandTotal - supplierPaidAmount);
+        const ratio = subtotal > 0 ? grandTotal / subtotal : 1;
+        const payments = Array.isArray(payload.payments) ? payload.payments.filter(p => p && p.accountId && Number(p.amount) > 0) : [];
+        const baseQtyOf = (item) => Math.max(0, Number(item.baseQuantity) || ((Number(item.quantity) || 0) * (Number(item.conversionFactor) || 1)));
+        const aggregateQty = (list) => {
+            const map = new Map();
+            for (const item of list || []) map.set(item.productId, (map.get(item.productId) || 0) + baseQtyOf(item));
+            return map;
+        };
+        const oldQtyByProduct = aggregateQty(oldPurchase.items || []);
+        const newQtyByProduct = aggregateQty(items);
+        const allProductIds = new Set([...oldQtyByProduct.keys(), ...newQtyByProduct.keys()]);
+        const updatedStockList = stock.map(row => ({ ...row }));
+        const updatedProducts = products.map(prod => ({ ...prod, fifoBatches: Array.isArray(prod.fifoBatches) ? prod.fifoBatches.map(batch => ({ ...batch })) : [] }));
+        const editMovements = [];
+
+        for (const productId of allProductIds) {
+            const oldQty = oldQtyByProduct.get(productId) || 0;
+            const newQty = newQtyByProduct.get(productId) || 0;
+            const pi = updatedProducts.findIndex(prod => prod.id === productId);
+            if (pi < 0) throw new Error('أحد أصناف فاتورة المشتريات لم يعد موجوداً في دليل الأصناف');
+            const prod = updatedProducts[pi];
+            const allBatches = Array.isArray(prod.fifoBatches) ? prod.fifoBatches : [];
+            const purchaseBatches = allBatches.filter(batch => batch.purchaseId === oldPurchase.id);
+            const hasTrackedBatches = purchaseBatches.length > 0;
+            const trackedRemaining = purchaseBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.remainingBaseQty) || 0), 0);
+            const oldRemaining = hasTrackedBatches ? Math.min(oldQty, trackedRemaining) : oldQty;
+            const consumedQty = Math.max(0, oldQty - oldRemaining);
+            if (newQty + 0.0000001 < consumedQty) {
+                const productName = prod.name || (oldPurchase.items || []).find(x => x.productId === productId)?.productName || 'الصنف';
+                throw new Error(`لا يمكن تقليل كمية ${productName} عن ${consumedQty.toFixed(4)} وحدة أساسية لأنها صُرفت/بيعت بالفعل من هذه المشتريات.`);
+            }
+
+            const delta = newQty - oldQty;
+            const si = updatedStockList.findIndex(row => row.productId === productId && row.warehouseId === warehouseId);
+            const currentStock = si >= 0 ? Number(updatedStockList[si].baseQuantity) || 0 : 0;
+            const newStock = currentStock + delta;
+            if (si >= 0) updatedStockList[si] = { ...updatedStockList[si], baseQuantity: newStock };
+            else updatedStockList.push({ productId, warehouseId, baseQuantity: newStock });
+
+            const keptBatches = allBatches.filter(batch => batch.purchaseId !== oldPurchase.id);
+            let consumedLeft = consumedQty;
+            const replacementBatches = [];
+            const productItems = items.filter(item => item.productId === productId);
+            for (let itemIndex = 0; itemIndex < productItems.length; itemIndex++) {
+                const item = productItems[itemIndex];
+                const itemBaseQty = baseQtyOf(item);
+                const factor = Math.max(0.00000001, Number(item.conversionFactor) || 1);
+                const unitCost = ((Number(item.unitPrice) || 0) * ratio) / factor;
+                const consumedFromItem = Math.min(consumedLeft, itemBaseQty);
+                consumedLeft = Math.max(0, consumedLeft - consumedFromItem);
+                replacementBatches.push({
+                    id: `batch-${oldPurchase.id}-${productId}-edit-${itemIndex}-${Date.now()}`,
+                    purchaseId: oldPurchase.id,
+                    warehouseId,
+                    receivedAt: purchaseDate,
+                    expiryDate: item.expiryDate || prod.expiryDate || '',
+                    unitCost: Number.isFinite(unitCost) ? unitCost : 0,
+                    remainingBaseQty: Math.max(0, itemBaseQty - consumedFromItem),
+                });
+            }
+            const nextBatches = [...keptBatches, ...replacementBatches];
+            const positiveBatches = nextBatches.filter(batch => Number(batch.remainingBaseQty) > 0);
+            const fifoQty = positiveBatches.reduce((sum, batch) => sum + (Number(batch.remainingBaseQty) || 0), 0);
+            const fifoValue = positiveBatches.reduce((sum, batch) => sum + (Number(batch.remainingBaseQty) || 0) * (Number(batch.unitCost) || 0), 0);
+            updatedProducts[pi] = {
+                ...prod,
+                fifoBatches: nextBatches,
+                costPrice: fifoQty > 0 ? parseFloat((fifoValue / fifoQty).toFixed(4)) : (Number(prod.costPrice) || 0),
+                updatedAt: generatedNow,
+            };
+            if (Math.abs(delta) > 0.0000001) {
+                const newItem = productItems[0];
+                editMovements.push({
+                    id: `mov-purchase-edit-${oldPurchase.id}-${productId}-${Date.now()}-${editMovements.length}`,
+                    date: generatedNow,
+                    productId,
+                    productName: prod.name || newItem?.productName || '',
+                    warehouseId,
+                    warehouseName: targetWarehouse.name || oldPurchase.warehouseName || 'المخزن',
+                    type: 'purchase_edit',
+                    unitName: prod.baseUnitName || 'وحدة أساسية',
+                    quantityInUnit: Math.abs(delta),
+                    conversionFactor: 1,
+                    baseQuantityChange: delta,
+                    newBaseBalance: newStock,
+                    referenceId: oldPurchase.id,
+                    referenceType: 'PURCHASE_EDIT',
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    notes: `تعديل فاتورة شراء ${oldPurchase.invoiceNumber}: ${oldQty} ← ${newQty}`,
                 });
             }
         }
-        // 3. Revert accounts for paid payments
-        if (pur.payments && pur.payments.length > 0) {
-            for (const p of pur.payments) {
-                const acc = accounts.find((a) => a.id === p.accountId);
-                if (acc) {
-                    await putInStore('accounts', {
-                        ...acc,
-                        balance: acc.balance + p.amount,
-                    });
-                }
-            }
+
+        const purchaseInvoice = {
+            ...oldPurchase,
+            supplierInvoiceNumber: payload.supplierInvoiceNumber || '',
+            date: purchaseDate,
+            supplierId: payload.supplierId,
+            supplierName: payload.supplierName,
+            warehouseId,
+            warehouseName: targetWarehouse.name || oldPurchase.warehouseName || 'المخزن',
+            items: items.map((item, idx) => ({ id: `pur-it-${Date.now()}-${idx}`, ...item, baseQuantity: baseQtyOf(item) })),
+            subtotal,
+            discountType: payload.discountType || 'fixed',
+            discountValue: Number(payload.discountValue) || 0,
+            discountTotal,
+            taxTotal: 0,
+            grandTotal,
+            shippingExpense,
+            totalWithShipping,
+            paidAmount,
+            supplierPaidAmount,
+            remainingAmount,
+            paymentType: payload.paymentType,
+            payments,
+            notes: payload.notes || '',
+            isSynced: false,
+            updatedAt: generatedNow,
+        };
+
+        await putInStore('purchases', purchaseInvoice);
+        await commitInventoryTransaction({ stockRows: updatedStockList, movementRows: editMovements, productRows: updatedProducts });
+
+        const updatedAccounts = accounts.map(account => ({ ...account }));
+        for (const oldPay of (oldPurchase.payments || [])) {
+            const ai = updatedAccounts.findIndex(account => account.id === oldPay.accountId);
+            if (ai >= 0) updatedAccounts[ai] = { ...updatedAccounts[ai], balance: (Number(updatedAccounts[ai].balance) || 0) + (Number(oldPay.amount) || 0) };
         }
-        // 4. Remove purchase
-        await deleteFromStore('purchases', id);
+        for (const newPay of payments) {
+            const ai = updatedAccounts.findIndex(account => account.id === newPay.accountId);
+            if (ai >= 0) updatedAccounts[ai] = { ...updatedAccounts[ai], balance: (Number(updatedAccounts[ai].balance) || 0) - (Number(newPay.amount) || 0) };
+        }
+        await bulkPut('accounts', updatedAccounts);
+
+        // مزامنة مصروف الشحن التلقائي مع تعديل الفاتورة دون إجراء خصم مالي ثانٍ على الحساب.
+        const allExpenseRows = await getAllFromStore('expenses').catch(() => []);
+        const shippingExpenseId = `exp-purchase-shipping-${oldPurchase.id}`;
+        const linkedExpenseRows = (allExpenseRows || []).filter(exp => exp && (exp.linkedPurchaseId === oldPurchase.id || (exp.referenceType === 'PURCHASE_SHIPPING' && exp.referenceNumber === oldPurchase.invoiceNumber)));
+        const existingShippingExpense = linkedExpenseRows.find(exp => exp.id === shippingExpenseId) || linkedExpenseRows[0] || null;
+        for (const exp of linkedExpenseRows) {
+            if (exp.id !== shippingExpenseId) await deleteFromStore('expenses', exp.id, true);
+        }
+        if (shippingExpense > 0) {
+            const primaryPay = payments[0];
+            const expenseAccount = updatedAccounts.find(account => account.id === primaryPay?.accountId) || null;
+            await putInStore('expenses', {
+                ...(existingShippingExpense || {}),
+                id: shippingExpenseId,
+                date: purchaseDate,
+                category: 'نقل وشحن',
+                amount: shippingExpense,
+                accountId: expenseAccount?.id || primaryPay?.accountId || null,
+                accountName: expenseAccount?.name || primaryPay?.accountName || 'ضمن دفعة فاتورة المشتريات',
+                notes: `مصروف شحن تلقائي لفاتورة مشتريات ${oldPurchase.invoiceNumber}${payload.supplierName ? ` - ${payload.supplierName}` : ''}`,
+                userId: currentUser.id,
+                userName: currentUser.name,
+                createdAt: existingShippingExpense?.createdAt || generatedNow,
+                updatedAt: generatedNow,
+                linkedPurchaseId: oldPurchase.id,
+                referenceType: 'PURCHASE_SHIPPING',
+                referenceNumber: oldPurchase.invoiceNumber,
+                automatic: true,
+                accountImpactHandled: true,
+                deletedAt: null,
+            });
+        } else if (existingShippingExpense) {
+            await deleteFromStore('expenses', existingShippingExpense.id, true);
+        }
+
+        const updatedSuppliers = suppliers.map(supplier => ({ ...supplier }));
+        const oldSuppIndex = updatedSuppliers.findIndex(supplier => supplier.id === oldPurchase.supplierId);
+        if (oldSuppIndex >= 0 && Number(oldPurchase.remainingAmount) > 0) {
+            updatedSuppliers[oldSuppIndex] = { ...updatedSuppliers[oldSuppIndex], balance: (Number(updatedSuppliers[oldSuppIndex].balance) || 0) - Number(oldPurchase.remainingAmount || 0) };
+        }
+        const newSuppIndex = updatedSuppliers.findIndex(supplier => supplier.id === payload.supplierId);
+        if (newSuppIndex >= 0 && remainingAmount > 0) {
+            updatedSuppliers[newSuppIndex] = { ...updatedSuppliers[newSuppIndex], balance: (Number(updatedSuppliers[newSuppIndex].balance) || 0) + remainingAmount };
+        }
+        const affectedSupplierIds = new Set([oldPurchase.supplierId, payload.supplierId].filter(Boolean));
+        for (const supplierId of affectedSupplierIds) {
+            const supplier = updatedSuppliers.find(s => s.id === supplierId);
+            if (supplier) await putInStore('suppliers', supplier);
+        }
+
+        const relatedStatements = (partnerStatements || []).filter(st => st && st.type === 'purchase' && st.referenceNumber === oldPurchase.invoiceNumber);
+        for (const statement of relatedStatements) await deleteFromStore('partner_statements', statement.id, true);
+        if (remainingAmount > 0 && newSuppIndex >= 0) {
+            const supplier = updatedSuppliers[newSuppIndex];
+            await putInStore('partner_statements', {
+                id: `stmt-pur-edit-${Date.now()}`,
+                date: purchaseDate,
+                type: 'purchase',
+                partyType: 'supplier',
+                partyId: supplier.id,
+                referenceNumber: oldPurchase.invoiceNumber,
+                description: `فاتورة مشتريات رقم ${oldPurchase.invoiceNumber}`,
+                debit: 0,
+                credit: remainingAmount,
+                runningBalance: Number(supplier.balance) || 0,
+            });
+        }
+
         await reloadData();
-        showToast(`تم حذف فاتورة الشراء [${pur.invoiceNumber}] بنجاح`, 'info');
-    }, [purchases, stock, suppliers, accounts, reloadData, showToast]);
+        showToast(`تم تعديل فاتورة المشتريات [${oldPurchase.invoiceNumber}] وإعادة حساب المخزون والحسابات`, 'success');
+        return purchaseInvoice;
+    }, [purchases, warehouses, stock, products, accounts, suppliers, partnerStatements, currentUser, reloadData, showToast]);
     // Cashier Shifts
     const openShift = useCallback(async (openingCash) => {
         const newShift = {
@@ -1987,6 +2442,8 @@ export const AppProvider = ({ children }) => {
         deleteEmployee,
         deleteInvoice,
         deletePurchase,
+        updateSaleInvoice,
+        updatePurchaseInvoice,
         openShift,
         closeShift,
         saveSettings,

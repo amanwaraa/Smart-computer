@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App.js?v=7.9.4.41-smart-stock-stable-2';
+import App from './App.js?v=7.9.4.44-purchase-shipping';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('ROOT_NOT_FOUND');

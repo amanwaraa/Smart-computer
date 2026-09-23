@@ -1,7 +1,7 @@
 /* Smart Computer Cloud Sync v2 - IndexedDB durable queue, tenant isolated, local-first delta sync */
 (()=>{'use strict';
-const VERSION='SmartComputerSyncV5-StockGuard';
-const STORES=new Set(['products','categories','warehouses','stock','stock_movements','invoices','purchases','customers','suppliers','partner_statements','accounts','transfers','expenses','shifts','audit_logs','held_invoices','settings','vouchers','employees']);
+const VERSION='SmartComputerSyncV6-InventoryEvents';
+const STORES=new Set(['products','categories','warehouses','stock_movements','invoices','purchases','customers','suppliers','partner_statements','accounts','transfers','expenses','shifts','audit_logs','held_invoices','settings','vouchers','employees']);
 const REALTIME_STORES=new Set([]);
 const META_PREFIX='oscar_sync_meta_v2::', LEGACY_PENDING_PREFIX='oscar_sync_pending_v1::', DEVICE_KEY='oscar_sync_device_v1', RT_SEEN_PREFIX='oscar_rt_seen_v3::';
 let bridge=null, initialized=false, busy=false, suppress=false, syncTimer=null, probeTimer=null, bc=null, schemaTenant='', seq=0, lastProbe=0, lastRealtimePull=0, realtimePullBusy=false, rerunRequested=false;
@@ -42,11 +42,13 @@ async function hydratePending(){
         const stale=[];
         for(const row of rows||[]){
           if(!row?.__oscarCloudOp||!row.id||!row.store){if(row?.id)stale.push(row.id);continue;}
+          if(row.store==='stock'){stale.push(row.id);delete merged[row.id];continue;}
           const {id,__oscarCloudOp,...op}=row;
           const cur=merged[id];
           if(!cur||Number(op.rev||0)>=Number(cur.rev||0))merged[id]=op;
         }
-        await Promise.allSettled(stale.map(id=>bridge.deleteFromStore('sync_queue',id,false)));
+        for(const [id,op] of Object.entries(merged)){if(op?.store==='stock'){delete merged[id];stale.push(id);}}
+        await Promise.allSettled([...new Set(stale)].map(id=>bridge.deleteFromStore('sync_queue',id,false)));
       }catch(e){console.warn('[OscarSync] queue hydrate warning',e)}
     }
     pendingCache=merged;pendingHydrated=true;

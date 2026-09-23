@@ -1,5 +1,5 @@
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
-import { code128Geometry } from './utils__code128.js?v=7.9.4.41-smart-stock-stable-2';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.44-purchase-shipping';
+import { code128Geometry } from './utils__code128.js?v=7.9.4.44-purchase-shipping';
 
 const imageCache = new Map();
 const num = v => { const n=Number(v); return Number.isFinite(n)?n:0; };
@@ -109,8 +109,10 @@ export async function renderInvoiceCanvas(invoice,settings={},options={}){
   const party=options.kind==='purchase'?(invoice?.supplierName||'مورد'):(invoice?.customerName||'زبون عام');
   roundedRect(ctx,margin,y,w-margin*2,150,12,'#f8fafc','#e2e8f0');y+=30;txt(ctx,`رقم الفاتورة: #${invoice?.invoiceNumber||'-'}`,w-margin-16,y,20,900,'right');txt(ctx,dateText(invoice?.date),margin+16,y,17,600,'left','#475569');y+=42;txt(ctx,options.kind==='purchase'?`المورد: ${party}`:`العميل: ${party}`,w-margin-16,y,19,800,'right');txt(ctx,options.kind==='purchase'?`المخزن: ${invoice?.warehouseName||'-'}`:`الكاشير: ${invoice?.cashierName||'-'}`,margin+16,y,17,700,'left');y+=63;
   const headers=['الصنف','الوحدة','الكمية','السعر','الإجمالي'];const rows=items.map(it=>[it.productName||'صنف',it.unitName||'-',num(it.quantity),money(it.unitPrice),money(it.total)]);y=drawTable(ctx,{x:margin,y,w:w-margin*2,headers,rows,fontSize:paper==='58mm'?17:19,headH:58});y+=28;
-  const totals=[['المجموع',invoice?.subtotal],...(num(invoice?.discountTotal)>0?[['الخصم',-num(invoice.discountTotal)]]:[]),...(num(invoice?.taxTotal)>0?[['الضريبة',invoice.taxTotal]]:[]),['الصافي المطلوب',invoice?.grandTotal],['المدفوع',invoice?.paidAmount],...(num(invoice?.remainingAmount)>0?[['المتبقي',invoice.remainingAmount]]:[])];
-  totals.forEach(([k,v],i)=>{roundedRect(ctx,w-margin-430,y,430,42,8,i===totals.length-3?'#eff6ff':'#fff','#e2e8f0');txt(ctx,`${k}:`,w-margin-18,y+21,18,i===totals.length-3?900:700,'right','#334155');txt(ctx,`${money(v)} ${settings.currencySymbol||''}`,w-margin-410,y+21,19,900,'left',num(v)<0?'#dc2626':'#0f172a');y+=48;});
+  const totals=options.kind==='purchase'
+    ? [['المجموع',invoice?.subtotal],...(num(invoice?.discountTotal)>0?[['الخصم',-num(invoice.discountTotal)]]:[]),['صافي البضاعة',invoice?.grandTotal],...(num(invoice?.shippingExpense)>0?[['مصروف الشحن',invoice.shippingExpense]]:[]),['الإجمالي مع الشحن',num(invoice?.totalWithShipping ?? (num(invoice?.grandTotal)+num(invoice?.shippingExpense)))],['المدفوع شامل الشحن',invoice?.paidAmount],...(num(invoice?.remainingAmount)>0?[['المتبقي للمورد',invoice.remainingAmount]]:[])]
+    : [['المجموع',invoice?.subtotal],...(num(invoice?.discountTotal)>0?[['الخصم',-num(invoice.discountTotal)]]:[]),...(num(invoice?.taxTotal)>0?[['الضريبة',invoice.taxTotal]]:[]),...(num(invoice?.shippingCustomerAmount || (invoice?.shippingChargeMode==='customer'?invoice?.shippingCost:0))>0?[['الشحن',invoice.shippingCustomerAmount || invoice.shippingCost]]:[]),['الصافي المطلوب',invoice?.grandTotal],['المدفوع',invoice?.paidAmount],...(num(invoice?.remainingAmount)>0?[['المتبقي',invoice.remainingAmount]]:[])];
+  totals.forEach(([k,v])=>{const emph=k==='الصافي المطلوب'||k==='الإجمالي مع الشحن';roundedRect(ctx,w-margin-430,y,430,42,8,emph?'#eff6ff':'#fff','#e2e8f0');txt(ctx,`${k}:`,w-margin-18,y+21,18,emph?900:700,'right','#334155');txt(ctx,`${money(v)} ${settings.currencySymbol||''}`,w-margin-410,y+21,19,900,'left',num(v)<0?'#dc2626':'#0f172a');y+=48;});
   if(invoice?.notes){y+=10;roundedRect(ctx,margin,y,w-margin*2,80,10,'#f8fafc','#e2e8f0');txt(ctx,'ملاحظات:',w-margin-16,y+24,16,800,'right','#64748b');wrapped(ctx,invoice.notes,w-margin-16,y+52,w-margin*2-32,16,600,'right','#334155',23,2);y+=96;}
   if(settings?.receiptShowBarcode!==false){const bw=Math.min(520,w-margin*2-80);drawBarcode(ctx,invoice?.invoiceNumber||'',(w-bw)/2,y+14,bw,58);y+=112;}
   txt(ctx,settings?.receiptFooterMessage||'شكراً لتعاملكم معنا',w/2,y+16,17,700,'center','#475569');y+=40;txt(ctx,`نظام ${settings.storeName||'Smart computer'} - POS`,w/2,y,13,600,'center','#94a3b8');

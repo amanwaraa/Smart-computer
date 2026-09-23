@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.41-smart-stock-stable-2';
-import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.41-smart-stock-stable-2';
-import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.41-smart-stock-stable-2';
-import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.41-smart-stock-stable-2';
-import { smartPrinter } from './services__printer.js?v=7.9.4.41-smart-stock-stable-2';
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.41-smart-stock-stable-2';
+import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.44-purchase-shipping';
+import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
+import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.44-purchase-shipping';
+import { smartPrinter } from './services__printer.js?v=7.9.4.44-purchase-shipping';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.44-purchase-shipping';
 import { Printer, X, Download, Image as ImageIcon, FileSpreadsheet, Bluetooth, MessageCircle, MessageSquare } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 
@@ -116,6 +116,7 @@ export const ThermalReceiptModal = () => {
             `الإجمالي: ${money(invoice.subtotal)} ${symbol}`,
             Number(invoice.discountTotal || 0) ? `الخصم: ${money(invoice.discountTotal)} ${symbol}` : '',
             Number(invoice.taxTotal || 0) ? `الضريبة: ${money(invoice.taxTotal)} ${symbol}` : '',
+            Number(invoice.shippingCustomerAmount || (invoice.shippingChargeMode === 'customer' ? invoice.shippingCost : 0)) ? `الشحن: ${money(invoice.shippingCustomerAmount || invoice.shippingCost)} ${symbol}` : '',
             `الصافي: ${money(invoice.grandTotal)} ${symbol}`,
             `المدفوع: ${money(invoice.paidAmount)} ${symbol}`,
             Number(invoice.remainingAmount || 0) ? `المتبقي: ${money(invoice.remainingAmount)} ${symbol}` : '',

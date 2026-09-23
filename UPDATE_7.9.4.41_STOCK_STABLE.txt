@@ -1,0 +1,1 @@
+Smart computer stock stability fix: local stock loads before UI, valid warehouse guard, timestamped stock writes, stale remote zero protection, and silent cloud repair.
