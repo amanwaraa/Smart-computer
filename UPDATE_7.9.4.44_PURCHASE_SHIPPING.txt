@@ -10,4 +10,4 @@ Smart Computer POS v7.9.4.44 — Purchase Shipping Expense
 - Deleting a purchase invoice removes its linked shipping expense and reverses the payment only once.
 - Purchase PDF/image details show goods net, shipping, total with shipping, paid including shipping, and supplier remaining amount.
 - Reports already subtract all expense records from net profit, so purchase shipping reduces net profit automatically.
-- PWA cache/import version bumped to 7.9.4.44-purchase-shipping.
+- PWA cache/import version bumped to 7.9.4.45-settings-sync.

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
 import { Package, Layers } from 'lucide-react';
 
 const h = React.createElement;

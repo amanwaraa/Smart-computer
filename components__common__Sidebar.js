@@ -1,7 +1,7 @@
 import React from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.44-purchase-shipping';
-import { canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.45-settings-sync';
+import { canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.45-settings-sync';
 import {
   LayoutDashboard, ShoppingCart, ReceiptText, Truck, Package, Boxes, Warehouse,
   Users, Building2, Wallet, Receipt, FileSpreadsheet, UserCheck, Barcode, BarChart3,

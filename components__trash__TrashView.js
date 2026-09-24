@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
 import { RotateCcw } from 'lucide-react';
 
 const h = React.createElement;

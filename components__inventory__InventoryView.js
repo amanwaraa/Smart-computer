@@ -1,13 +1,13 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useRef } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
-import { formatStockBreakdown } from './utils__unitTree.js?v=7.9.4.44-purchase-shipping';
-import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.44-purchase-shipping';
-import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.44-purchase-shipping';
-import { downloadProfessionalTablePDF, downloadProfessionalTableExcel, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
-import { TransferForm } from './components__inventory__TransferForm.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
+import { formatStockBreakdown } from './utils__unitTree.js?v=7.9.4.45-settings-sync';
+import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.45-settings-sync';
+import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.45-settings-sync';
+import { downloadProfessionalTablePDF, downloadProfessionalTableExcel, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { TransferForm } from './components__inventory__TransferForm.js?v=7.9.4.45-settings-sync';
 import { ArrowLeftRight, Building2, Download, Search, Image as ImageIcon, FileSpreadsheet, Trash2, } from 'lucide-react';
 export const InventoryView = () => {
     const { products, warehouses, settings, getProductStock, adjustStockCount, transferStock, recordDamagedStock, showToast, } = useApp();

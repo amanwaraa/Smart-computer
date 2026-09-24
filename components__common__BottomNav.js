@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { canAccessTab } from './utils__permissions.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { canAccessTab } from './utils__permissions.js?v=7.9.4.45-settings-sync';
 import {
   ShoppingCart, ReceiptText, Package, Warehouse, Menu, X, LayoutDashboard, Truck,
   Boxes, Users, Building2, Wallet, Receipt, Barcode, BarChart3, Trash2, Settings

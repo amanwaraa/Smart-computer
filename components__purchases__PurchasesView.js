@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
-import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.44-purchase-shipping';
-import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.44-purchase-shipping';
-import { downloadProfessionalPurchaseInvoicePDF, downloadProfessionalPurchaseInvoiceImage, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { getBrandLogoDataUrl } from './brand__logo.js?v=7.9.4.45-settings-sync';
+import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.45-settings-sync';
+import { downloadProfessionalPurchaseInvoicePDF, downloadProfessionalPurchaseInvoiceImage, downloadProfessionalTableExcel } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
 import { Plus, Trash2, Building2, Eye, X, Image as ImageIcon, FileDown, FileSpreadsheet, Printer, AlertTriangle, ReceiptText, Pencil } from 'lucide-react';
 
 const h = React.createElement;

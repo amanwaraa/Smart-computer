@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.44-purchase-shipping';
-import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
-import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.44-purchase-shipping';
-import { smartPrinter } from './services__printer.js?v=7.9.4.44-purchase-shipping';
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { printElementOnly, warmExportLibraries } from './utils__export.js?v=7.9.4.45-settings-sync';
+import { downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel, warmProfessionalExportLibraries } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
+import { renderInvoiceCanvas } from './utils__canvasRenderer.js?v=7.9.4.45-settings-sync';
+import { smartPrinter } from './services__printer.js?v=7.9.4.45-settings-sync';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.45-settings-sync';
 import { Printer, X, Download, Image as ImageIcon, FileSpreadsheet, Bluetooth, MessageCircle, MessageSquare } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 
@@ -107,6 +107,9 @@ export const ThermalReceiptModal = () => {
         const symbol = settings.currencySymbol || 'ج.م';
         return [
             settings.storeName || 'Smart computer',
+            settings.address || '',
+            settings.phone ? `هاتف: ${settings.phone}` : '',
+            settings.taxNumber ? `الرقم الضريبي: ${settings.taxNumber}` : '',
             `فاتورة رقم: ${invoice.invoiceNumber}`,
             `التاريخ: ${new Date(invoice.date).toLocaleString('ar-EG')}`,
             `العميل: ${invoice.customerName || 'عميل نقدي'}`,

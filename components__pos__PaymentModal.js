@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
 import { Banknote, Clock, Split, CheckCircle2, X, AlertCircle, Coins, } from 'lucide-react';
 export const PaymentModal = ({ isOpen, onClose, onSuccess }) => {
     const { cart, customers, selectedCustomer, setSelectedCustomer, accounts, settings, createSaleInvoice, setShowThermalModal, saveCustomer, showToast, invoiceDiscountType, setInvoiceDiscountType, invoiceDiscountValue, setInvoiceDiscountValue, } = useApp();

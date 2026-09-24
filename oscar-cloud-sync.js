@@ -80,7 +80,7 @@ async function captureStoreChange(store,value,{deleted=false,key}={}){
   const k=keyString(store,value,key);if(!k)return false;
   const rev=nextRev(),id=pk(store,k),op={store,key:k,deleted:!!deleted,value:deleted?null:clone(value),rev,deviceId:deviceId(),timestamp:Date.now(),attempts:0};
   await persistPendingOp(id,op);
-  const realtime=REALTIME_STORES.has(store)||(store==='settings'&&k==='store_config');
+  const realtime=REALTIME_STORES.has(store)||(store==='settings'&&(k==='store_config'||k==='company_profile'));
   broadcast('local-change');
   requestSync(realtime?15:80);
   // Restaurant/settings operations should leave the device immediately.
@@ -153,14 +153,14 @@ async function pullRealtimeSnapshot({force=false}={}){
     await hydratePending();
     const s=await ensureSchema(),ranges=realtimePaths(),parts=[],args=[];
     for(const [lo,hi] of ranges){parts.push('(path>=? AND path<?)');args.push(lo,hi);}
-    const settingsPath=pathFor('settings','store_config');parts.push('path=?');args.push(settingsPath);
+    const settingsPath=pathFor('settings','store_config'),profilePath=pathFor('settings','company_profile');parts.push('path=?');args.push(settingsPath);parts.push('path=?');args.push(profilePath);
     const [r]=await s.d.pipeline(s.c,[{sql:`SELECT path,payload,deleted,updated_at,sync_batch FROM ${s.table} WHERE ${parts.join(' OR ')} ORDER BY path`,args}],45000);
     const rows=s.d.rows(r),pending=readPending(),seen=readRealtimeSeen();let applied=0;const touched=new Set();
     suppress=true;
     try{
       for(const row of rows){
         const parsed=parsePath(row.path);if(!parsed)continue;
-        const isRelevant=REALTIME_STORES.has(parsed.store)||(parsed.store==='settings'&&parsed.key==='store_config');if(!isRelevant)continue;
+        const isRelevant=REALTIME_STORES.has(parsed.store)||(parsed.store==='settings'&&(parsed.key==='store_config'||parsed.key==='company_profile'));if(!isRelevant)continue;
         let env=null;try{env=typeof row.payload==='string'?JSON.parse(row.payload):row.payload}catch(_){env=null}
         const remoteRev=Number(row.updated_at||env?.rev||0),id=pk(parsed.store,parsed.key),local=pending[id];
         if(local&&Number(local.rev||0)>remoteRev)continue;

@@ -1,9 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, getCanonicalStockSnapshot, ensureInventoryBaselines, commitInventoryTransaction, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.44-purchase-shipping';
-import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.44-purchase-shipping';
-import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.44-purchase-shipping';
-import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.44-purchase-shipping';
+import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, getCanonicalStockSnapshot, ensureInventoryBaselines, commitInventoryTransaction, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.45-settings-sync';
+import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.45-settings-sync';
+import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.45-settings-sync';
+import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.45-settings-sync';
 const AppContext = createContext(null);
 const recordTime = (item = {}) => {
     const fields = ['createdAt', 'date', 'timestamp', 'startTime', 'updatedAt'];
@@ -17,9 +17,12 @@ const recordTime = (item = {}) => {
     return idMatch ? Number(idMatch[1]) : 0;
 };
 const newestFirst = (items = []) => [...(items || [])].sort((a, b) => recordTime(b) - recordTime(a));
+const COMPANY_PROFILE_FIELDS = ['storeName','subtitle','phone','address','taxNumber','receiptFooterMessage','logoUrl','receiptShowStoreInfo','receiptShowLogo'];
 const normalizeCurrencySettings = (value) => {
     if (!value) return value;
-    let next = { ...value, currency: 'EGP', currencySymbol: 'ج.م' };
+    let next = { ...value };
+    if (!next.currency) next.currency = 'EGP';
+    if (!next.currencySymbol) next.currencySymbol = 'ج.م';
     if (!['customer', 'profit'].includes(next.shippingDefaultChargeMode)) next.shippingDefaultChargeMode = 'customer';
     // One-time Smart computer branding migration. Afterwards the user can still upload a custom logo/name.
     if (next.smartComputerBrandInitialized !== true) {
@@ -42,6 +45,26 @@ const normalizeActiveWarehouseSettings = (value, warehouseRows = []) => {
     if (wanted && rows.some(w => String(w.id) === wanted)) return value;
     const fallback = rows.find(w => w?.isDefault) || rows.find(w => w?.id === 'wh-main') || rows[0];
     return fallback?.id ? { ...value, activeWarehouseId: fallback.id } : value;
+};
+const mergeCompanyProfileSettings = (settingsRow, profileRow) => {
+    if (!settingsRow) return settingsRow;
+    if (!profileRow) return settingsRow;
+    const merged = { ...settingsRow };
+    for (const key of COMPANY_PROFILE_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(profileRow, key)) merged[key] = profileRow[key];
+    }
+    if (profileRow.companyProfileUpdatedAt) merged.companyProfileUpdatedAt = profileRow.companyProfileUpdatedAt;
+    return merged;
+};
+const profileChangedBetween = (base, patch) => COMPANY_PROFILE_FIELDS.some((key) =>
+    Object.prototype.hasOwnProperty.call(patch || {}, key) && String(base?.[key] ?? '') !== String(patch?.[key] ?? '')
+);
+const buildCompanyProfileRow = (settingsValue, stamp) => {
+    const row = { key: 'company_profile', companyProfileUpdatedAt: stamp };
+    for (const key of COMPANY_PROFILE_FIELDS) row[key] = settingsValue?.[key] ?? '';
+    row.receiptShowStoreInfo = settingsValue?.receiptShowStoreInfo !== false;
+    row.receiptShowLogo = settingsValue?.receiptShowLogo !== false;
+    return row;
 };
 export const AppProvider = ({ children }) => {
     const [isLoaded, setIsLoaded] = useState(false);
@@ -198,18 +221,20 @@ export const AppProvider = ({ children }) => {
                 setActiveEmployee((prev) => emps.find((e) => e.id === loginAccountId) || emps.find((e) => e.id === prev.id) || emps[0]);
             }
             if (sett) {
-                let normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(sett), whs || []);
+                const profileRow = await getFromStore('settings', 'company_profile').catch(() => null);
+                const mergedSett = mergeCompanyProfileSettings(sett, profileRow);
+                let normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(mergedSett), whs || []);
                 const removedRestaurantSettingKeys = ['isRestaurantModeEnabled','restaurantModeDefaultInitialized','autoPrintKitchenTicket','kitchenTicketWidth','kitchenTicketShowPrices','targetPrepTimeMinutes','tableAfterPayment','enableKitchenSoundAlerts'];
                 let removedRestaurantSettings = false;
                 for (const key of removedRestaurantSettingKeys) { if (Object.prototype.hasOwnProperty.call(normalizedSettings, key)) { delete normalizedSettings[key]; removedRestaurantSettings = true; } }
-                let settingsChanged = normalizedSettings.currency !== sett.currency
-                    || normalizedSettings.currencySymbol !== sett.currencySymbol
-                    || normalizedSettings.smartComputerBrandInitialized !== sett.smartComputerBrandInitialized
-                    || normalizedSettings.storeName !== sett.storeName
-                    || normalizedSettings.logoUrl !== sett.logoUrl
-                    || normalizedSettings.receiptFooterMessage !== sett.receiptFooterMessage
-                    || normalizedSettings.activeWarehouseId !== sett.activeWarehouseId
-                    || normalizedSettings.shippingDefaultChargeMode !== sett.shippingDefaultChargeMode
+                let settingsChanged = normalizedSettings.currency !== mergedSett.currency
+                    || normalizedSettings.currencySymbol !== mergedSett.currencySymbol
+                    || normalizedSettings.smartComputerBrandInitialized !== mergedSett.smartComputerBrandInitialized
+                    || normalizedSettings.storeName !== mergedSett.storeName
+                    || normalizedSettings.logoUrl !== mergedSett.logoUrl
+                    || normalizedSettings.receiptFooterMessage !== mergedSett.receiptFooterMessage
+                    || normalizedSettings.activeWarehouseId !== mergedSett.activeWarehouseId
+                    || normalizedSettings.shippingDefaultChargeMode !== mergedSett.shippingDefaultChargeMode
                     || removedRestaurantSettings;
                 setSettings(normalizedSettings);
                 if (settingsChanged) {
@@ -260,18 +285,19 @@ export const AppProvider = ({ children }) => {
         if (wanted.has('partner_statements')) jobs.push(getAllFromStore('partner_statements').then(v => setPartnerStatements(newestFirst(v))));
         if (wanted.has('vouchers')) jobs.push(getAllFromStore('vouchers').then(v => setVouchers((v || []).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime()))));
         if (wanted.has('employees')) jobs.push(getAllFromStore('employees').then(v => { if(v?.length){ setEmployees(newestFirst(v)); const loginId=window.OscarActivation?.readRuntime?.()?.account?.id; setActiveEmployee(prev => v.find(e=>e.id===loginId)||v.find(e=>e.id===prev?.id)||v[0]); } }));
-        if (wanted.has('settings')) jobs.push(Promise.all([getFromStore('settings','store_config'), getAllFromStore('warehouses')]).then(async ([v, whRows]) => {
+        if (wanted.has('settings')) jobs.push(Promise.all([getFromStore('settings','store_config'), getFromStore('settings','company_profile'), getAllFromStore('warehouses')]).then(async ([v, profileRow, whRows]) => {
             if (!v) return;
-            const normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(v), whRows || []);
+            const mergedSettings = mergeCompanyProfileSettings(v, profileRow);
+            const normalizedSettings = normalizeActiveWarehouseSettings(normalizeCurrencySettings(mergedSettings), whRows || []);
             setSettings(normalizedSettings);
-            if (normalizedSettings.currency !== v.currency
-                || normalizedSettings.currencySymbol !== v.currencySymbol
-                || normalizedSettings.smartComputerBrandInitialized !== v.smartComputerBrandInitialized
-                || normalizedSettings.storeName !== v.storeName
-                || normalizedSettings.logoUrl !== v.logoUrl
-                || normalizedSettings.receiptFooterMessage !== v.receiptFooterMessage
-                || normalizedSettings.activeWarehouseId !== v.activeWarehouseId
-                || normalizedSettings.shippingDefaultChargeMode !== v.shippingDefaultChargeMode) {
+            if (normalizedSettings.currency !== mergedSettings.currency
+                || normalizedSettings.currencySymbol !== mergedSettings.currencySymbol
+                || normalizedSettings.smartComputerBrandInitialized !== mergedSettings.smartComputerBrandInitialized
+                || normalizedSettings.storeName !== mergedSettings.storeName
+                || normalizedSettings.logoUrl !== mergedSettings.logoUrl
+                || normalizedSettings.receiptFooterMessage !== mergedSettings.receiptFooterMessage
+                || normalizedSettings.activeWarehouseId !== mergedSettings.activeWarehouseId
+                || normalizedSettings.shippingDefaultChargeMode !== mergedSettings.shippingDefaultChargeMode) {
                 await putInStore('settings', { key: 'store_config', ...normalizedSettings });
             }
         }));
@@ -2285,18 +2311,43 @@ export const AppProvider = ({ children }) => {
         showToast(`تم إغلاق الوردية. الفرق: ${diff >= 0 ? `+${diff}` : diff} ${settings.currencySymbol}`, diff === 0 ? 'success' : 'warning');
     }, [activeShift, settings.currencySymbol, reloadData, showToast]);
     const saveSettings = useCallback(async (newSettings) => {
-        await putInStore('settings', { key: 'store_config', ...newSettings });
-        setSettings(newSettings);
-        await reloadData();
-        showToast('تم حفظ الإعدادات بنجاح', 'success');
-    }, [reloadData, showToast]);
-    const updateSettings = useCallback(async (patch) => {
-        const nextSettings = { ...settings, ...patch };
-        await putInStore('settings', { key: 'store_config', ...nextSettings });
+        const persisted = await getFromStore('settings', 'store_config').catch(() => null);
+        const profileRow = await getFromStore('settings', 'company_profile').catch(() => null);
+        const base = mergeCompanyProfileSettings(persisted || settings || DEFAULT_SETTINGS, profileRow);
+        const stamp = new Date().toISOString();
+        const profileChanged = profileChangedBetween(base, newSettings || {});
+        const nextSettings = { ...base, ...newSettings, key: 'store_config', settingsUpdatedAt: stamp };
+        if (profileChanged) {
+            nextSettings.companyProfileUpdatedAt = stamp;
+            nextSettings.receiptShowStoreInfo = true;
+        }
+        await putInStore('settings', nextSettings);
+        if (profileChanged) await putInStore('settings', buildCompanyProfileRow(nextSettings, stamp));
         setSettings(nextSettings);
-        await reloadData();
-        showToast('تم تحديث الإعدادات بنجاح', 'success');
-    }, [settings, reloadData, showToast]);
+        window.OscarCloudSync?.requestSync?.(20);
+        await reloadStores(['settings']);
+        showToast('تم حفظ الإعدادات بنجاح', 'success');
+        return nextSettings;
+    }, [settings, reloadStores, showToast]);
+    const updateSettings = useCallback(async (patch) => {
+        const persisted = await getFromStore('settings', 'store_config').catch(() => null);
+        const profileRow = await getFromStore('settings', 'company_profile').catch(() => null);
+        const base = mergeCompanyProfileSettings(persisted || settings || DEFAULT_SETTINGS, profileRow);
+        const stamp = new Date().toISOString();
+        const profileChanged = profileChangedBetween(base, patch || {});
+        const nextSettings = { ...base, ...patch, key: 'store_config', settingsUpdatedAt: stamp };
+        if (profileChanged) {
+            nextSettings.companyProfileUpdatedAt = stamp;
+            nextSettings.receiptShowStoreInfo = true;
+        }
+        await putInStore('settings', nextSettings);
+        if (profileChanged) await putInStore('settings', buildCompanyProfileRow(nextSettings, stamp));
+        setSettings(nextSettings);
+        window.OscarCloudSync?.requestSync?.(20);
+        await reloadStores(['settings']);
+        showToast(profileChanged ? 'تم حفظ بيانات المنشأة ومزامنتها' : 'تم تحديث الإعدادات بنجاح', 'success');
+        return nextSettings;
+    }, [settings, reloadStores, showToast]);
     // Professional tenant cloud sync
     const syncPendingQueue = useCallback(async () => {
         setIsSyncing(true);

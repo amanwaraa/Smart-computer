@@ -1,12 +1,12 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useRef } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.44-purchase-shipping';
-import { exportToCSV, printReceiptElement } from './utils__export.js?v=7.9.4.44-purchase-shipping';
-import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.44-purchase-shipping';
-import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.44-purchase-shipping';
-import { downloadProfessionalCustomerStatementPDF, downloadProfessionalCustomerStatementImage, downloadProfessionalCustomerStatementExcel, downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { exportToCSV, printReceiptElement } from './utils__export.js?v=7.9.4.45-settings-sync';
+import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.45-settings-sync';
+import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.45-settings-sync';
+import { downloadProfessionalCustomerStatementPDF, downloadProfessionalCustomerStatementImage, downloadProfessionalCustomerStatementExcel, downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
 import { Plus, Search, FileText, DollarSign, Download, Printer, Trash2, X, Edit, Image as ImageIcon, FileSpreadsheet, } from 'lucide-react';
 export const CustomersView = () => {
     const { customers, invoices, vouchers, accounts, settings, saveCustomer, softDeleteCustomer, recordCustomerPayment, showToast, } = useApp();

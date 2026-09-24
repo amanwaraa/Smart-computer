@@ -1,7 +1,7 @@
-import { downloadBlob } from './utils__export.js?v=7.9.4.44-purchase-shipping';
-import { downloadCanvasAsImage } from './utils__imageExport.js?v=7.9.4.44-purchase-shipping';
-import { downloadCanvasAsPDF, downloadCanvasesAsPDF } from './utils__pdfExport.js?v=7.9.4.44-purchase-shipping';
-import { renderTableCanvas, renderTablePages, renderInvoiceCanvas, renderVoucherCanvas, renderCustomerStatementPages, combineCanvasesVertical, customerMovements } from './utils__canvasRenderer.js?v=7.9.4.44-purchase-shipping';
+import { downloadBlob } from './utils__export.js?v=7.9.4.45-settings-sync';
+import { downloadCanvasAsImage } from './utils__imageExport.js?v=7.9.4.45-settings-sync';
+import { downloadCanvasAsPDF, downloadCanvasesAsPDF } from './utils__pdfExport.js?v=7.9.4.45-settings-sync';
+import { renderTableCanvas, renderTablePages, renderInvoiceCanvas, renderVoucherCanvas, renderCustomerStatementPages, combineCanvasesVertical, customerMovements } from './utils__canvasRenderer.js?v=7.9.4.45-settings-sync';
 
 const money=v=>{const n=Number(v);return Number.isFinite(n)?n.toFixed(2):'0.00';};
 const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0;};

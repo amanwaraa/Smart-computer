@@ -1,0 +1,11 @@
+Smart Computer v7.9.4.45 - Settings / Company Profile Sync Fix
+
+- Fixed company/store settings persistence for store name, address/location, phone/contact, tax number, invoice footer and logo visibility settings.
+- Added a dedicated synchronized company_profile settings record so stale settings from another device cannot overwrite the latest invoice identity details.
+- Protected the settings form from remote refresh while the user is actively editing fields.
+- Saving company profile data now timestamps the profile and requests immediate cloud sync.
+- Store information is forced visible on invoices after saving company identity/contact details.
+- Removed the hard reset of user-selected currency symbol during settings normalization; EGP/ج.م remain defaults only when missing.
+- Sales invoice details now also show the tax number; WhatsApp/SMS invoice text includes store address, phone and tax number.
+- Purchase invoices, vouchers, professional PDF/image/Excel exports and thermal invoices continue reading live synchronized settings.
+- PWA cache build bumped to 7.9.4.45-settings-sync.

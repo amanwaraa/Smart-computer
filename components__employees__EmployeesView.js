@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.44-purchase-shipping';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.44-purchase-shipping';
-import { GENERAL_PAGE_PERMISSIONS, normalizeEmployeePermissions } from './utils__permissions.js?v=7.9.4.44-purchase-shipping';
+import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
+import { GENERAL_PAGE_PERMISSIONS, normalizeEmployeePermissions } from './utils__permissions.js?v=7.9.4.45-settings-sync';
 import {
   Users, UserPlus, ShieldCheck, Trash2, Edit2, UserCheck, Download,
   X
