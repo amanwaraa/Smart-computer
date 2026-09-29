@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
 import { Trash2, Plus, Minus, CreditCard, User, UserPlus, ChevronDown, LayoutGrid, Search, PauseCircle, Clock, ShoppingBag, X } from 'lucide-react';
 
 const h = React.createElement;
@@ -64,6 +64,8 @@ export const FullCartView = ({ onOpenPayment, onToggleLayout }) => {
   const rawGrandTotal = Math.max(0, subtotal - invoiceDiscountAmount);
   const grandTotal = settings.scaleModeEnabled ? Math.round(rawGrandTotal) : rawGrandTotal;
   const totalItemCount = cart.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const totalAverageCost = cart.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.costPriceAtSale || 0)), 0);
+  const invoiceProfit = grandTotal - totalAverageCost;
 
   const q = quickProductSearch.trim().toLowerCase();
   const quickProducts = q
@@ -121,7 +123,7 @@ export const FullCartView = ({ onOpenPayment, onToggleLayout }) => {
                   h('th',{className:'py-2.5 px-3 w-10 text-center'},'#'),h('th',{className:'py-2.5 px-3'},'اسم الصنف'),h('th',{className:'py-2.5 px-3'},'الباركود'),h('th',{className:'py-2.5 px-3'},'الوحدة'),h('th',{className:'py-2.5 px-3 text-center'},'الكمية'),h('th',{className:'py-2.5 px-3'},settings.scaleModeEnabled?'مبلغ السطر':'سعر البيع'),h('th',{className:'py-2.5 px-3'},'الإجمالي'),h('th',{className:'py-2.5 px-3 w-12'},'')
                 )),
                 h('tbody', null, ...cart.map((item, idx) => {
-                  const key=`${item.productId}-${item.unitId}`; const activeUnit=(item.availableUnits||[]).find((u)=>u.id===item.unitId); const barcode=(activeUnit?.barcodes||[])[0]||'-'; const lineTotal=Number(item.quantity||0)*Number(item.unitPrice||0); const editableValue=settings.scaleModeEnabled?lineTotal:item.unitPrice;
+                  const key=item.cartLineId||`${item.productId}-${item.unitId}-${item.lastAddedAt||''}`; const activeUnit=(item.availableUnits||[]).find((u)=>u.id===item.unitId); const barcode=(activeUnit?.barcodes||[])[0]||'-'; const lineTotal=Number(item.quantity||0)*Number(item.unitPrice||0); const editableValue=settings.scaleModeEnabled?lineTotal:item.unitPrice;
                   return h('tr',{key,className:'border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50/60 dark:hover:bg-slate-800/30'},
                     h('td',{className:'py-2 px-3 text-center text-slate-400 font-mono'},idx+1),
                     h('td',{className:'py-2 px-3 font-bold text-slate-900 dark:text-white max-w-[260px] truncate'},item.productName),
@@ -129,10 +131,10 @@ export const FullCartView = ({ onOpenPayment, onToggleLayout }) => {
                     h('td',{className:'py-2 px-3'},h('div',{className:'relative inline-block','data-full-cart-unit-menu':key},
                       h('button',{type:'button',onPointerDown:(e)=>e.stopPropagation(),onClick:(e)=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();const menuW=Math.max(180,Math.min(260,r.width+70));const menuH=Math.min(260,52+((item.availableUnits||[]).length*42));const below=window.innerHeight-r.bottom-8;const openUp=below<menuH&&r.top>below;const left=Math.min(Math.max(8,r.right-menuW),Math.max(8,window.innerWidth-menuW-8));const top=openUp?Math.max(8,r.top-menuH-6):Math.min(window.innerHeight-menuH-8,r.bottom+6);setUnitMenuPos({top,left,width:menuW});setActiveUnitDropdown((v)=>v===key?null:key);},className:'flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold text-xs'},h('span',null,item.unitName),h(ChevronDown,{className:'w-3.5 h-3.5'}))
                     )),
-                    h('td',{className:'py-2 px-3 text-center'},h('div',{className:'inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 border rounded-xl p-1'},h('button',{type:'button',onClick:()=>updateCartItemQuantity(item.productId,item.unitId,item.quantity-1),className:'w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-900'},h(Minus,{className:'w-3.5 h-3.5'})),h('input',{type:'number',step:'any',min:'0.001',value:item.quantity,onChange:(e)=>updateCartItemQuantity(item.productId,item.unitId,parseFloat(e.target.value)||0.001),className:'w-14 text-center text-sm font-black font-mono bg-transparent focus:outline-none'}),h('button',{type:'button',onClick:()=>updateCartItemQuantity(item.productId,item.unitId,item.quantity+1),className:'w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-900'},h(Plus,{className:'w-3.5 h-3.5'})))),
-                    h('td',{className:'py-2 px-3'},h(EditablePrice,{value:editableValue,currency:settings.currencySymbol,scaleMode:!!settings.scaleModeEnabled,onCommit:(n)=>settings.scaleModeEnabled?updateCartItemScaleAmount(item.productId,item.unitId,n):updateCartItemPrice(item.productId,item.unitId,n)})),
+                    h('td',{className:'py-2 px-3 text-center'},h('div',{className:'inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 border rounded-xl p-1'},h('button',{type:'button',onClick:()=>updateCartItemQuantity(item.productId,item.unitId,item.quantity-1,item.cartLineId),className:'w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-900'},h(Minus,{className:'w-3.5 h-3.5'})),h('input',{type:'number',step:'any',min:'0.001',value:item.quantity,onChange:(e)=>updateCartItemQuantity(item.productId,item.unitId,parseFloat(e.target.value)||0.001,item.cartLineId),className:'w-14 text-center text-sm font-black font-mono bg-transparent focus:outline-none'}),h('button',{type:'button',onClick:()=>updateCartItemQuantity(item.productId,item.unitId,item.quantity+1,item.cartLineId),className:'w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-900'},h(Plus,{className:'w-3.5 h-3.5'})))),
+                    h('td',{className:'py-2 px-3'},h(EditablePrice,{value:editableValue,currency:settings.currencySymbol,scaleMode:!!settings.scaleModeEnabled,onCommit:(n)=>settings.scaleModeEnabled?updateCartItemScaleAmount(item.productId,item.unitId,n,item.cartLineId):updateCartItemPrice(item.productId,item.unitId,n,item.cartLineId)})),
                     h('td',{className:'py-2 px-3 font-mono font-black text-base text-emerald-600'},`${lineTotal.toFixed(2)} ${settings.currencySymbol}`),
-                    h('td',{className:'py-2 px-3 text-center'},h('button',{type:'button',onClick:()=>removeFromCart(item.productId,item.unitId),className:'p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50'},h(Trash2,{className:'w-4 h-4'})))
+                    h('td',{className:'py-2 px-3 text-center'},h('button',{type:'button',onClick:()=>removeFromCart(item.productId,item.unitId,item.cartLineId),className:'p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50'},h(Trash2,{className:'w-4 h-4'})))
                   );
                 }))
               )
@@ -143,6 +145,7 @@ export const FullCartView = ({ onOpenPayment, onToggleLayout }) => {
       h('div', { className: 'max-w-7xl mx-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3' },
         h('div', { className: 'flex flex-wrap items-center gap-4 sm:gap-6 text-xs' },
           h('div', null, h('span', { className: 'text-slate-400 block text-[10px]' }, 'إجمالي الأصناف:'), h('span', { className: 'font-bold text-sm font-mono' }, `${subtotal.toFixed(2)} ${settings.currencySymbol}`)),
+          h('div', { className: 'pr-4 border-r border-slate-200 dark:border-slate-700' }, h('span', { className: 'text-blue-600 dark:text-blue-300 font-bold block text-[10px]' }, 'ربح الفاتورة (متوسط التكلفة):'), h('span', { className: `font-black text-lg font-mono ${invoiceProfit < 0 ? 'text-rose-600' : 'text-blue-600 dark:text-blue-300'}` }, `${invoiceProfit.toFixed(2)} ${settings.currencySymbol}`)),
           h('div', { className: 'pr-4 border-r border-slate-200 dark:border-slate-700' }, h('span', { className: 'text-emerald-600 font-bold block text-xs' }, settings.scaleModeEnabled?'الصافي المقرب المطلوب:':'الصافي النهائي المطلوب:'), h('span', { className: 'font-black text-2xl text-emerald-600 font-mono' }, `${grandTotal.toFixed(2)} ${settings.currencySymbol}`))
         ),
         h('div', { id: 'full-cart-invoice-discount', className: 'flex items-center gap-1.5 flex-wrap rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-2 py-1.5' },
@@ -161,10 +164,10 @@ export const FullCartView = ({ onOpenPayment, onToggleLayout }) => {
     )
   );
 
-  const activeMenuItem = activeUnitDropdown ? cart.find((i)=>`${i.productId}-${i.unitId}`===activeUnitDropdown) : null;
+  const activeMenuItem = activeUnitDropdown ? cart.find((i)=>(i.cartLineId||`${i.productId}-${i.unitId}-${i.lastAddedAt||''}`)===activeUnitDropdown) : null;
   const unitPortal = activeUnitDropdown&&unitMenuPos&&activeMenuItem&&typeof document!=='undefined' ? createPortal(
     h('div',{'data-full-cart-unit-menu':activeUnitDropdown,onPointerDown:(e)=>e.stopPropagation(),style:{position:'fixed',top:`${unitMenuPos.top}px`,left:`${unitMenuPos.left}px`,width:`${unitMenuPos.width}px`,zIndex:2147483000},className:'rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1.5 shadow-2xl max-h-[260px] overflow-y-auto'},
-      ...(activeMenuItem.availableUnits||[]).map((u)=>h('button',{key:u.id,type:'button',onClick:()=>{setActiveUnitDropdown(null);setUnitMenuPos(null);updateCartItemUnit(activeMenuItem.productId,activeMenuItem.unitId,u.id);},className:`w-full text-right px-3 py-2 text-xs rounded-lg flex items-center justify-between gap-3 ${u.id===activeMenuItem.unitId?'bg-emerald-600 text-white font-bold':'text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'}`},h('span',{className:'truncate'},u.name),h('span',{className:'text-[10px] font-mono opacity-80 shrink-0'},`${u.salePrice} ${settings.currencySymbol}`)))
+      ...(activeMenuItem.availableUnits||[]).map((u)=>h('button',{key:u.id,type:'button',onClick:()=>{setActiveUnitDropdown(null);setUnitMenuPos(null);updateCartItemUnit(activeMenuItem.productId,activeMenuItem.unitId,u.id,activeMenuItem.cartLineId);},className:`w-full text-right px-3 py-2 text-xs rounded-lg flex items-center justify-between gap-3 ${u.id===activeMenuItem.unitId?'bg-emerald-600 text-white font-bold':'text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'}`},h('span',{className:'truncate'},u.name),h('span',{className:'text-[10px] font-mono opacity-80 shrink-0'},`${u.salePrice} ${settings.currencySymbol}`)))
     ),document.body) : null;
   const customerPortal = showQuickCustomer&&typeof document!=='undefined' ? createPortal(
     h('div',{className:'fixed inset-0 p-4 flex items-center justify-center',style:{zIndex:2147483500,background:'rgba(15,23,42,.55)',backdropFilter:'blur(8px)',WebkitBackdropFilter:'blur(8px)'},onPointerDown:(e)=>{if(e.target===e.currentTarget)setShowQuickCustomer(false);}},

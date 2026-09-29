@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
 import { RefreshCw, CheckCircle, Wifi, WifiOff, X } from 'lucide-react';
 export const SyncModal = () => {
     const { showSyncModal, setShowSyncModal, syncQueue, isOnline, isSyncing, syncPendingQueue, retrySyncItem, } = useApp();

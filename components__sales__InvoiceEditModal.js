@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
 import { X, Plus, Trash2, Save, Truck, ReceiptText } from 'lucide-react';
 
 const h = React.createElement;

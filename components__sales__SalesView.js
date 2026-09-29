@@ -1,11 +1,11 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useRef } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
-import { downloadProfessionalTablePDF, downloadProfessionalTableImage, downloadProfessionalTableExcel, downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
-import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.45-settings-sync';
-import { SalesInvoiceEditModal } from './components__sales__InvoiceEditModal.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
+import { downloadProfessionalTablePDF, downloadProfessionalTableImage, downloadProfessionalTableExcel, downloadProfessionalInvoicePDF, downloadProfessionalInvoiceImage, downloadProfessionalInvoiceExcel } from './utils__professionalExport.js?v=7.9.4.47-local-first-fast-save';
+import { getBrandLogoDataUrl, DEFAULT_LOGO_DATA_URL } from './brand__logo.js?v=7.9.4.47-local-first-fast-save';
+import { SalesInvoiceEditModal } from './components__sales__InvoiceEditModal.js?v=7.9.4.47-local-first-fast-save';
 import { Search, Printer, RotateCcw, Download, Eye, X, AlertCircle, Trash2, Pencil, Image as ImageIcon, FileSpreadsheet, MessageCircle, MessageSquare, } from 'lucide-react';
 export const SalesView = () => {
     const { invoices, accounts, customers, settings, currentUser, deleteInvoice, setShowThermalModal, createReturnInvoice, showToast, } = useApp();

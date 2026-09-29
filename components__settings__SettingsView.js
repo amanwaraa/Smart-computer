@@ -1,10 +1,10 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
-import { usePWAInstall } from './hooks__usePWAInstall.js?v=7.9.4.45-settings-sync';
-import { db } from './services__db.js?v=7.9.4.45-settings-sync';
-import { smartPrinter } from './services__printer.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
+import { usePWAInstall } from './hooks__usePWAInstall.js?v=7.9.4.47-local-first-fast-save';
+import { db } from './services__db.js?v=7.9.4.47-local-first-fast-save';
+import { smartPrinter } from './services__printer.js?v=7.9.4.47-local-first-fast-save';
 import { Store, Printer, ShieldCheck, Building2, Database, Download, Upload, RefreshCw, Trash2, Save, Edit2, X, Bluetooth, Cable, } from 'lucide-react';
 export const SettingsView = () => {
     const { settings, updateSettings, warehouses, saveWarehouse, deleteWarehouse, showToast, refreshData, } = useApp();

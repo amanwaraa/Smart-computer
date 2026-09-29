@@ -1,14 +1,14 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useState, useRef } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
-import { BarcodeCameraModal } from './components__pos__CameraScannerModal.js?v=7.9.4.45-settings-sync';
-import { calculateUnitConversions, formatStockBreakdown } from './utils__unitTree.js?v=7.9.4.45-settings-sync';
-import { exportToCSV } from './utils__export.js?v=7.9.4.45-settings-sync';
-import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.45-settings-sync';
-import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.45-settings-sync';
-import { downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { Pagination, usePagination } from './components__common__Pagination.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
+import { BarcodeCameraModal } from './components__pos__CameraScannerModal.js?v=7.9.4.47-local-first-fast-save';
+import { calculateUnitConversions, formatStockBreakdown } from './utils__unitTree.js?v=7.9.4.47-local-first-fast-save';
+import { exportToCSV } from './utils__export.js?v=7.9.4.47-local-first-fast-save';
+import { downloadElementAsPDF } from './utils__pdfExport.js?v=7.9.4.47-local-first-fast-save';
+import { downloadElementAsImage } from './utils__imageExport.js?v=7.9.4.47-local-first-fast-save';
+import { downloadProfessionalTablePDF, downloadProfessionalTableImage } from './utils__professionalExport.js?v=7.9.4.47-local-first-fast-save';
 import { Plus, Search, Trash2, Edit, Layers, FolderTree, X, Download, Image as ImageIcon, FileSpreadsheet, Camera, } from 'lucide-react';
 const h = React.createElement;
 const normalizeArabicDigits = (value) => String(value ?? '')

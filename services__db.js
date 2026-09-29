@@ -1,4 +1,4 @@
-import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.45-settings-sync';
+import { calculateUnitConversions } from './utils__unitTree.js?v=7.9.4.47-local-first-fast-save';
 const DB_BASE_NAME = 'Oscar_Accounting_POS_DB';
 const DB_VERSION = 7;
 export const getTenantId = () => String(window.OscarActivation?.readRuntime?.()?.companyId || 'local').trim() || 'local';
@@ -127,6 +127,19 @@ function captureCloud(storeName, value, opts={}) {
     try { if (!window.OscarCloudSync?.suppress) return window.OscarCloudSync?.captureStoreChange?.(storeName, value, opts) || Promise.resolve(false); } catch (e) { console.warn('Cloud capture warning', e); }
     return Promise.resolve(false);
 }
+
+// Local-first rule: a CRUD operation is considered complete as soon as its IndexedDB
+// transaction commits. Cloud queueing/sync is deliberately detached from the user's save
+// path so slow/unstable internet can never delay an invoice, voucher, stock movement, etc.
+function deferCloudCapture(storeName, value, opts={}) {
+    const run = () => captureCloud(storeName, value, opts).catch((e) => console.warn('Deferred cloud capture warning', e));
+    try {
+        if (typeof queueMicrotask === 'function') queueMicrotask(run);
+        else Promise.resolve().then(run);
+    } catch (_) {
+        setTimeout(run, 0);
+    }
+}
 // Generic CRUD operations
 function recordKey(storeName, value) {
     if (storeName === 'stock') return [value?.productId, value?.warehouseId];
@@ -183,7 +196,7 @@ export async function putInStore(storeName, value, notifySync = true) {
         tx.objectStore(storeName).put(storedValue);
         tx.oncomplete = () => {
             if (notifySync) {
-                captureCloud(storeName, storedValue).catch(() => {});
+                deferCloudCapture(storeName, storedValue);
                 if (syncChannel) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName, tenantId: getTenantId() });
             }
             resolve();
@@ -198,9 +211,9 @@ export async function deleteFromStore(storeName, key, notifySync = true) {
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
         const request = store.delete(key);
-        request.onsuccess = async () => {
+        request.onsuccess = () => {
             if (notifySync) {
-                await captureCloud(storeName, null, { deleted: true, key }).catch(() => {});
+                deferCloudCapture(storeName, null, { deleted: true, key });
                 if (syncChannel) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName, tenantId: getTenantId() });
             }
             resolve();
@@ -215,8 +228,8 @@ export async function clearStore(storeName, notifySync = true) {
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
         const request = store.clear();
-        request.onsuccess = async () => {
-            if (notifySync) await Promise.allSettled(existing.map(v => captureCloud(storeName, null, { deleted:true, key: storeName === 'stock' ? [v.productId, v.warehouseId] : (storeName === 'settings' ? v.key : v.id) })));
+        request.onsuccess = () => {
+            if (notifySync) existing.forEach(v => deferCloudCapture(storeName, null, { deleted:true, key: storeName === 'stock' ? [v.productId, v.warehouseId] : (storeName === 'settings' ? v.key : v.id) }));
             resolve();
         };
         request.onerror = () => reject(request.error);
@@ -244,7 +257,7 @@ export async function bulkPut(storeName, items, notifySync = true) {
         changedItems.forEach((item) => store.put(item));
         tx.oncomplete = () => {
             if (notifySync) {
-                Promise.allSettled(changedItems.map(item => captureCloud(storeName, item))).catch(() => {});
+                changedItems.forEach(item => deferCloudCapture(storeName, item));
                 if (syncChannel) syncChannel.postMessage({ type: 'STORE_UPDATED', storeName, tenantId: getTenantId() });
             }
             resolve();
@@ -439,10 +452,10 @@ export async function commitInventoryTransaction({ stockRows = [], movementRows 
     });
 
     // Only immutable movements/products are synchronized. The stock snapshot stays local.
-    await Promise.allSettled([
-        ...normalizedMovements.map(row => captureCloud('stock_movements', row)),
-        ...normalizedProducts.map(row => captureCloud('products', row)),
-    ]);
+    // Do NOT await queueing/network here: the inventory transaction above is already durable
+    // locally, so cashier completion can return immediately and sync follows in background.
+    normalizedMovements.forEach(row => deferCloudCapture('stock_movements', row));
+    normalizedProducts.forEach(row => deferCloudCapture('products', row));
     if (syncChannel) {
         syncChannel.postMessage({ type: 'STORE_UPDATED', storeName: 'stock', tenantId: getTenantId() });
         syncChannel.postMessage({ type: 'STORE_UPDATED', storeName: 'stock_movements', tenantId: getTenantId() });

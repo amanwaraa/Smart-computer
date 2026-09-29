@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { ProductGrid } from './components__pos__ProductGrid.js?v=7.9.4.45-settings-sync';
-import { CartPanel } from './components__pos__CartPanel.js?v=7.9.4.45-settings-sync';
-import { FullCartView } from './components__pos__FullCartView.js?v=7.9.4.45-settings-sync';
-import { PaymentModal } from './components__pos__PaymentModal.js?v=7.9.4.45-settings-sync';
-import { CameraScannerModal } from './components__pos__CameraScannerModal.js?v=7.9.4.45-settings-sync';
-import { HoldInvoicesModal } from './components__pos__HoldInvoicesModal.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { ProductGrid } from './components__pos__ProductGrid.js?v=7.9.4.47-local-first-fast-save';
+import { CartPanel } from './components__pos__CartPanel.js?v=7.9.4.47-local-first-fast-save';
+import { FullCartView } from './components__pos__FullCartView.js?v=7.9.4.47-local-first-fast-save';
+import { PaymentModal } from './components__pos__PaymentModal.js?v=7.9.4.47-local-first-fast-save';
+import { CameraScannerModal } from './components__pos__CameraScannerModal.js?v=7.9.4.47-local-first-fast-save';
+import { HoldInvoicesModal } from './components__pos__HoldInvoicesModal.js?v=7.9.4.47-local-first-fast-save';
 import { Barcode, Camera, Maximize2 } from 'lucide-react';
 const h = React.createElement;
 

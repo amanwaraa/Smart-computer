@@ -1,9 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, getCanonicalStockSnapshot, ensureInventoryBaselines, commitInventoryTransaction, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.45-settings-sync';
-import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.45-settings-sync';
-import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.45-settings-sync';
-import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.45-settings-sync';
+import { getAllFromStore, getFromStore, putInStore, deleteFromStore, clearStore, bulkPut, getCanonicalStockSnapshot, ensureInventoryBaselines, commitInventoryTransaction, initializeDatabase, seedDatabaseDefaults, migrateLegacyDatabaseIfNeeded, ensurePrimaryShowroomWarehouse, resetDatabase, exportDatabaseBackup, importDatabaseBackup, syncChannel, DEFAULT_SETTINGS, CASH_CUSTOMER, DEFAULT_CATEGORIES, DEFAULT_WAREHOUSES, DEFAULT_ACCOUNTS, DEFAULT_SUPPLIERS, getDemoProducts, getDemoStock, DEFAULT_EMPLOYEES, } from './services__db.js?v=7.9.4.47-local-first-fast-save';
+import { calculateUnitConversions, findUnitByBarcode, toBaseQuantity } from './utils__unitTree.js?v=7.9.4.47-local-first-fast-save';
+import { playBeepSound, playSuccessSound, playErrorSound } from './services__audio.js?v=7.9.4.47-local-first-fast-save';
+import { normalizeEmployeePermissions, canAccessTab, firstAllowedTab } from './utils__permissions.js?v=7.9.4.47-local-first-fast-save';
 const AppContext = createContext(null);
 const recordTime = (item = {}) => {
     const fields = ['createdAt', 'date', 'timestamp', 'startTime', 'updatedAt'];
@@ -17,6 +17,11 @@ const recordTime = (item = {}) => {
     return idMatch ? Number(idMatch[1]) : 0;
 };
 const newestFirst = (items = []) => [...(items || [])].sort((a, b) => recordTime(b) - recordTime(a));
+const makeCartLineId = () => `cart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+const findCartLineIndex = (items, productId, unitId, cartLineId) => {
+    if (cartLineId) return items.findIndex((item) => item.cartLineId === cartLineId);
+    return items.findIndex((item) => item.productId === productId && item.unitId === unitId);
+};
 const COMPANY_PROFILE_FIELDS = ['storeName','subtitle','phone','address','taxNumber','receiptFooterMessage','logoUrl','receiptShowStoreInfo','receiptShowLogo'];
 const normalizeCurrencySettings = (value) => {
     if (!value) return value;
@@ -452,12 +457,24 @@ export const AppProvider = ({ children }) => {
         if (!targetUnit)
             return;
         const baseStock = getProductStock(product.id, settings.activeWarehouseId);
+        const originalUnitPrice = Number(targetUnit.salePrice ?? product.sellingPrice ?? 0);
+        const conversionFactor = Number(targetUnit.conversionToBase) || 1;
+        const averageUnitCost = (Number(product.costPrice) || 0) * conversionFactor;
         setCart((prev) => {
-            const existingIndex = prev.findIndex((item) => item.productId === product.id && item.unitId === targetUnit.id);
+            // لا ندمج الإضافة الجديدة مع سطر تم تغيير سعره يدوياً.
+            // الإضافة من بطاقة الصنف تبحث فقط عن سطر ما زال على سعر الكتالوج الأصلي.
+            const existingIndex = prev.findIndex((item) => {
+                if (item.productId !== product.id || item.unitId !== targetUnit.id) return false;
+                const catalogPrice = Number(item.catalogUnitPrice ?? originalUnitPrice);
+                const currentPrice = Number(item.unitPrice ?? 0);
+                return Math.abs(currentPrice - catalogPrice) < 0.000001 && Math.abs(catalogPrice - originalUnitPrice) < 0.000001;
+            });
             if (existingIndex >= 0) {
                 const updatedItem = {
                     ...prev[existingIndex],
-                    quantity: prev[existingIndex].quantity + quantity,
+                    cartLineId: prev[existingIndex].cartLineId || makeCartLineId(),
+                    quantity: (Number(prev[existingIndex].quantity) || 0) + quantity,
+                    costPriceAtSale: averageUnitCost,
                     lastAddedAt: Date.now(),
                 };
                 // آخر صنف تمت إضافته/زيادته يظهر أولاً في السلة.
@@ -465,18 +482,20 @@ export const AppProvider = ({ children }) => {
             }
             return [
                 {
+                    cartLineId: makeCartLineId(),
                     productId: product.id,
                     productName: product.name,
                     unitId: targetUnit.id,
                     unitName: targetUnit.name,
                     availableUnits: product.units,
                     quantity: quantity,
-                    conversionFactor: targetUnit.conversionToBase || 1,
-                    unitPrice: targetUnit.salePrice || product.sellingPrice,
-                    catalogUnitPrice: Number(targetUnit.salePrice || product.sellingPrice || 0),
+                    conversionFactor,
+                    unitPrice: originalUnitPrice,
+                    catalogUnitPrice: originalUnitPrice,
                     discount: 0,
                     taxRate: product.taxRate || 0,
-                    costPriceAtSale: (product.costPrice || 0) * (targetUnit.conversionToBase || 1),
+                    // متوسط التكلفة المرجح الحالي للوحدة المباعة.
+                    costPriceAtSale: averageUnitCost,
                     baseStockAvailable: baseStock,
                     lastAddedAt: Date.now(),
                 },
@@ -485,57 +504,87 @@ export const AppProvider = ({ children }) => {
         });
         playBeepSound(settings.scannerBeepEnabled);
     }, [getProductStock, settings.activeWarehouseId, settings.scannerBeepEnabled]);
-    const updateCartItemUnit = useCallback((productId, oldUnitId, newUnitId) => {
+    const updateCartItemUnit = useCallback((productId, oldUnitId, newUnitId, cartLineId) => {
         setCart((prev) => {
-            const index = prev.findIndex((item) => item.productId === productId && item.unitId === oldUnitId);
+            const index = findCartLineIndex(prev, productId, oldUnitId, cartLineId);
             if (index === -1)
                 return prev;
             const currentItem = prev[index];
             const newUnit = currentItem.availableUnits.find((u) => u.id === newUnitId);
             if (!newUnit)
                 return prev;
+            const oldFactor = Number(currentItem.conversionFactor) || 1;
+            const newFactor = Number(newUnit.conversionToBase) || 1;
+            const averageBaseCost = (Number(currentItem.costPriceAtSale) || 0) / oldFactor;
             const updated = [...prev];
             updated[index] = {
                 ...currentItem,
+                cartLineId: currentItem.cartLineId || makeCartLineId(),
                 unitId: newUnit.id,
                 unitName: newUnit.name,
-                conversionFactor: newUnit.conversionToBase || 1,
-                unitPrice: newUnit.salePrice,
-                catalogUnitPrice: Number(newUnit.salePrice || 0),
-                costPriceAtSale: (currentItem.costPriceAtSale / currentItem.conversionFactor) * (newUnit.conversionToBase || 1),
+                conversionFactor: newFactor,
+                unitPrice: Number(newUnit.salePrice ?? 0),
+                catalogUnitPrice: Number(newUnit.salePrice ?? 0),
+                costPriceAtSale: averageBaseCost * newFactor,
             };
             return updated;
         });
     }, []);
-    const updateCartItemQuantity = useCallback((productId, unitId, quantity) => {
+    const updateCartItemQuantity = useCallback((productId, unitId, quantity, cartLineId) => {
         if (quantity <= 0) {
-            removeFromCart(productId, unitId);
+            removeFromCart(productId, unitId, cartLineId);
             return;
         }
-        setCart((prev) => prev.map((item) => item.productId === productId && item.unitId === unitId ? { ...item, quantity } : item));
+        setCart((prev) => {
+            const index = findCartLineIndex(prev, productId, unitId, cartLineId);
+            if (index < 0) return prev;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], cartLineId: updated[index].cartLineId || makeCartLineId(), quantity };
+            return updated;
+        });
     }, []);
-    const updateCartItemPrice = useCallback((productId, unitId, unitPrice) => {
+    const updateCartItemPrice = useCallback((productId, unitId, unitPrice, cartLineId) => {
         const nextPrice = Number(unitPrice);
         if (!Number.isFinite(nextPrice) || nextPrice < 0) return;
-        setCart((prev) => prev.map((item) => item.productId === productId && item.unitId === unitId ? { ...item, unitPrice: nextPrice } : item));
+        setCart((prev) => {
+            const index = findCartLineIndex(prev, productId, unitId, cartLineId);
+            if (index < 0) return prev;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], cartLineId: updated[index].cartLineId || makeCartLineId(), unitPrice: nextPrice };
+            return updated;
+        });
     }, []);
-    const updateCartItemScaleAmount = useCallback((productId, unitId, enteredAmount) => {
+    const updateCartItemScaleAmount = useCallback((productId, unitId, enteredAmount, cartLineId) => {
         const amount = Number(enteredAmount);
         if (!Number.isFinite(amount) || amount < 0) return;
-        setCart((prev) => prev.map((item) => {
-            if (item.productId !== productId || item.unitId !== unitId) return item;
+        setCart((prev) => {
+            const index = findCartLineIndex(prev, productId, unitId, cartLineId);
+            if (index < 0) return prev;
+            const item = prev[index];
             const unit = (item.availableUnits || []).find((u) => u.id === item.unitId);
             const referencePrice = Number(item.catalogUnitPrice ?? unit?.salePrice ?? item.unitPrice ?? 0);
-            if (!Number.isFinite(referencePrice) || referencePrice <= 0) return item;
+            if (!Number.isFinite(referencePrice) || referencePrice <= 0) return prev;
             const quantity = amount <= 0 ? 0.001 : amount / referencePrice;
-            return { ...item, unitPrice: referencePrice, catalogUnitPrice: referencePrice, quantity: Math.max(0.001, Number(quantity.toFixed(4))) };
-        }));
+            const updated = [...prev];
+            updated[index] = { ...item, cartLineId: item.cartLineId || makeCartLineId(), unitPrice: referencePrice, catalogUnitPrice: referencePrice, quantity: Math.max(0.001, Number(quantity.toFixed(4))) };
+            return updated;
+        });
     }, []);
-    const updateCartItemDiscount = useCallback((productId, unitId, discount) => {
-        setCart((prev) => prev.map((item) => item.productId === productId && item.unitId === unitId ? { ...item, discount: Math.max(0, discount) } : item));
+    const updateCartItemDiscount = useCallback((productId, unitId, discount, cartLineId) => {
+        setCart((prev) => {
+            const index = findCartLineIndex(prev, productId, unitId, cartLineId);
+            if (index < 0) return prev;
+            const updated = [...prev];
+            updated[index] = { ...updated[index], cartLineId: updated[index].cartLineId || makeCartLineId(), discount: Math.max(0, discount) };
+            return updated;
+        });
     }, []);
-    const removeFromCart = useCallback((productId, unitId) => {
-        setCart((prev) => prev.filter((item) => !(item.productId === productId && item.unitId === unitId)));
+    const removeFromCart = useCallback((productId, unitId, cartLineId) => {
+        setCart((prev) => {
+            const index = findCartLineIndex(prev, productId, unitId, cartLineId);
+            if (index < 0) return prev;
+            return prev.filter((_, i) => i !== index);
+        });
     }, []);
     const clearCart = useCallback(() => {
         setCart([]);
@@ -571,7 +620,7 @@ export const AppProvider = ({ children }) => {
         if (cart.length > 0) {
             await holdCurrentInvoice('فاتورة مستبدلة تلقائياً');
         }
-        setCart(held.items);
+        setCart((held.items || []).map((item) => ({ ...item, cartLineId: item.cartLineId || makeCartLineId() })));
         setSelectedCustomer(held.customerId === CASH_CUSTOMER.id ? CASH_CUSTOMER : (customers.find((c) => c.id === held.customerId) || CASH_CUSTOMER));
         await deleteFromStore('held_invoices', heldId);
         setHeldInvoices((prev) => prev.filter((h) => h.id !== heldId));
@@ -601,7 +650,7 @@ export const AppProvider = ({ children }) => {
         showToast(`لم يتم العثور على صنف بالباركود: ${clean}`, 'warning');
         return false;
     }, [products, addToCart, showToast, settings.scannerBeepEnabled]);
-    // Create Sale Invoice (invoice discount + FIFO cost consumption)
+    // Create Sale Invoice (local-first + weighted-average cost profit)
     const createSaleInvoice = useCallback(async (payload = {}) => {
         const isDirectSale = Array.isArray(payload.items) && payload.items.length > 0;
         const saleCart = isDirectSale ? payload.items : cart;
@@ -644,10 +693,13 @@ export const AppProvider = ({ children }) => {
             const lineTotal = lineSubtotal + lineTax;
             subtotal += lineSubtotal; lineDiscountTotal += 0; taxTotal += lineTax;
             const baseQuantity = item.quantity * item.conversionFactor;
-            const fallbackBaseCost = item.conversionFactor ? (item.costPriceAtSale / item.conversionFactor) : item.costPriceAtSale;
+            const soldProduct = productCopies.find((p) => p.id === item.productId);
+            const fallbackBaseCost = item.conversionFactor ? (Number(item.costPriceAtSale || 0) / item.conversionFactor) : Number(item.costPriceAtSale || 0);
+            const currentAverageBaseCost = Number(soldProduct?.costPrice) || fallbackBaseCost || 0;
             const recipe = recipeByProductId.get(item.productId);
             const recipeConsumption = [];
-            let fifoLineCost = 0;
+            let weightedAverageLineCost = 0;
+            let batchCostConsumed = 0;
             if (recipe && Array.isArray(recipe.ingredients || recipe.items) && (recipe.ingredients || recipe.items).length > 0) {
                 const ingredients = recipe.ingredients || recipe.items;
                 for (const ing of ingredients) {
@@ -660,9 +712,11 @@ export const AppProvider = ({ children }) => {
                     const basePerMeal = Number(ing.baseQuantity) > 0 ? Number(ing.baseQuantity) : qtyPerMeal * factor;
                     const requiredBaseQty = basePerMeal * item.quantity;
                     if (requiredBaseQty <= 0) continue;
-                    const ingredientBaseCost = Number(ingProduct.costPrice) || (Number(ingUnit?.costPrice) / Math.max(1, Number(ingUnit?.conversionToBase) || 1)) || 0;
-                    const cost = consumeFifo(ingProduct.id, requiredBaseQty, ingredientBaseCost);
-                    fifoLineCost += cost;
+                    const ingredientAverageBaseCost = Number(ingProduct.costPrice) || (Number(ingUnit?.costPrice) / Math.max(1, Number(ingUnit?.conversionToBase) || 1)) || 0;
+                    const consumedBatchCost = consumeFifo(ingProduct.id, requiredBaseQty, ingredientAverageBaseCost);
+                    const averageCost = requiredBaseQty * ingredientAverageBaseCost;
+                    batchCostConsumed += consumedBatchCost;
+                    weightedAverageLineCost += averageCost;
                     recipeConsumption.push({
                         recipeId: recipe.id,
                         productId: ingProduct.id,
@@ -674,16 +728,20 @@ export const AppProvider = ({ children }) => {
                         baseQuantityPerMeal: basePerMeal,
                         soldMealQuantity: item.quantity,
                         baseQuantity: requiredBaseQty,
-                        fifoCostTotal: cost,
+                        fifoCostTotal: averageCost,
+                        weightedAverageCostTotal: averageCost,
+                        batchCostConsumed: consumedBatchCost,
                     });
                 }
                 if (recipeConsumption.length === 0) {
-                    fifoLineCost = consumeFifo(item.productId, baseQuantity, fallbackBaseCost || 0);
+                    batchCostConsumed = consumeFifo(item.productId, baseQuantity, currentAverageBaseCost);
+                    weightedAverageLineCost = baseQuantity * currentAverageBaseCost;
                 }
             } else {
-                fifoLineCost = consumeFifo(item.productId, baseQuantity, fallbackBaseCost || 0);
+                batchCostConsumed = consumeFifo(item.productId, baseQuantity, currentAverageBaseCost);
+                weightedAverageLineCost = baseQuantity * currentAverageBaseCost;
             }
-            return { id:'item-'+Math.random().toString(36).substring(2,9), productId:item.productId, productName:item.productName, unitId:item.unitId, unitName:item.unitName, quantity:item.quantity, conversionFactor:item.conversionFactor, baseQuantity, unitPrice:item.unitPrice, discount:0, taxRate:item.taxRate, total:lineTotal, fifoCostTotal:fifoLineCost, costPriceAtSale:item.quantity>0?fifoLineCost/item.quantity:0, isManufacturedMeal:recipeConsumption.length>0, recipeId:recipe?.id, recipeConsumption };
+            return { id:'item-'+Math.random().toString(36).substring(2,9), productId:item.productId, productName:item.productName, unitId:item.unitId, unitName:item.unitName, quantity:item.quantity, conversionFactor:item.conversionFactor, baseQuantity, unitPrice:item.unitPrice, discount:0, taxRate:item.taxRate, total:lineTotal, fifoCostTotal:weightedAverageLineCost, weightedAverageCostTotal:weightedAverageLineCost, batchCostConsumed, costPriceAtSale:item.quantity>0?weightedAverageLineCost/item.quantity:0, isManufacturedMeal:recipeConsumption.length>0, recipeId:recipe?.id, recipeConsumption };
         });
         const beforeInvoiceDiscount = Math.max(0, subtotal - lineDiscountTotal + taxTotal);
         const effectiveDiscountType = payload.invoiceDiscountType || invoiceDiscountType;

@@ -1,0 +1,10 @@
+Smart computer v7.9.4.47 — Weighted Average Profit + Cashier Cart Lines
+
+1) Sales profit/cost now uses the current weighted-average product cost (WAC) captured at sale time instead of old FIFO batch cost.
+2) FIFO/FEFO batches can still be consumed for stock batch tracking, while profit uses WAC consistently.
+3) Sale invoice items store weightedAverageCostTotal and costPriceAtSale from WAC; returns reuse the original sale cost snapshot.
+4) Financial reports prefer the WAC snapshot and the FIFO label was corrected to Weighted Average Cost.
+5) Cashier cart now shows live invoice profit after invoice discount, based on the current average cost.
+6) Cart lines have unique IDs. If a line price is manually changed, clicking the product again adds/uses a separate original-price line instead of changing the edited line.
+7) +/- quantity, price editing, unit changing, and deleting target the exact cart line, so duplicated product lines can coexist safely.
+8) Cache/version bumped so the new logic loads immediately after deployment.

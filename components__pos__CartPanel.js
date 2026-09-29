@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useApp } from './context__AppContext.js?v=7.9.4.45-settings-sync';
-import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.45-settings-sync';
+import { useApp } from './context__AppContext.js?v=7.9.4.47-local-first-fast-save';
+import { SearchableDropdown } from './components__common__Dropdown.js?v=7.9.4.47-local-first-fast-save';
 import { Trash2, Plus, Minus, PauseCircle, CreditCard, User, UserPlus, Tag, ChevronDown, Clock, X } from 'lucide-react';
 
 const h = React.createElement;
@@ -65,6 +65,8 @@ export const CartPanel = ({ onOpenPayment }) => {
     : Math.min(beforeInvoiceDiscount, Math.max(0, rawDiscount));
   const rawGrandTotal = Math.max(0, beforeInvoiceDiscount - invoiceDiscountAmount);
   const grandTotal = settings.scaleModeEnabled ? Math.round(rawGrandTotal) : rawGrandTotal;
+  const totalAverageCost = cart.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.costPriceAtSale || 0)), 0);
+  const invoiceProfit = grandTotal - totalAverageCost;
 
   const hasSelectedCustomerInList = !!selectedCustomer?.id && (selectedCustomer.id === 'cust-walkin' || customers.some((c) => String(c.id) === String(selectedCustomer.id)));
   const customerOptions = [
@@ -103,13 +105,13 @@ export const CartPanel = ({ onOpenPayment }) => {
             h('p', { className: 'text-sm font-bold text-slate-600 dark:text-slate-400' }, 'السلة فارغة')
           )
         : cart.map((item) => {
-            const key = `${item.productId}-${item.unitId}`;
+            const key = item.cartLineId || `${item.productId}-${item.unitId}-${item.lastAddedAt || ''}`;
             const lineTotal = Number(item.quantity || 0) * Number(item.unitPrice || 0);
             const editableValue = settings.scaleModeEnabled ? lineTotal : item.unitPrice;
             return h('div', { key, className: 'p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40' },
               h('div', { className: 'flex items-center justify-between gap-2' },
                 h('div', { className: 'font-bold text-[11px] leading-5 text-slate-900 dark:text-white truncate flex-1' }, item.productName),
-                h('button', { type: 'button', onClick: () => removeFromCart(item.productId, item.unitId), className: 'p-1 rounded text-slate-400 hover:text-rose-500' }, h(Trash2, { className: 'w-3.5 h-3.5' }))
+                h('button', { type: 'button', onClick: () => removeFromCart(item.productId, item.unitId, item.cartLineId), className: 'p-1 rounded text-slate-400 hover:text-rose-500' }, h(Trash2, { className: 'w-3.5 h-3.5' }))
               ),
               h('div', { className: 'flex items-center justify-between gap-2 mt-1' },
                 h('div', { className: 'relative', 'data-cart-unit-menu': key },
@@ -117,13 +119,13 @@ export const CartPanel = ({ onOpenPayment }) => {
                     h('span', null, item.unitName), h(ChevronDown, { className: 'w-3 h-3 text-emerald-600' })
                   )
                 ),
-                h(EditablePrice, { value: editableValue, currency: settings.currencySymbol, scaleMode: !!settings.scaleModeEnabled, onCommit: (n) => settings.scaleModeEnabled ? updateCartItemScaleAmount(item.productId, item.unitId, n) : updateCartItemPrice(item.productId, item.unitId, n) })
+                h(EditablePrice, { value: editableValue, currency: settings.currencySymbol, scaleMode: !!settings.scaleModeEnabled, onCommit: (n) => settings.scaleModeEnabled ? updateCartItemScaleAmount(item.productId, item.unitId, n, item.cartLineId) : updateCartItemPrice(item.productId, item.unitId, n, item.cartLineId) })
               ),
               h('div', { className: 'flex items-center justify-between mt-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60' },
                 h('div', { className: 'flex items-center gap-0.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5' },
-                  h('button', { type: 'button', onClick: () => updateCartItemQuantity(item.productId, item.unitId, item.quantity - 1), className: 'p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800' }, h(Minus, { className: 'w-3 h-3' })),
-                  h('input', { type: 'number', step: 'any', min: '0.001', value: item.quantity, onChange: (e) => updateCartItemQuantity(item.productId, item.unitId, parseFloat(e.target.value) || 0.001), className: 'w-11 text-center text-xs font-bold font-mono bg-transparent focus:outline-none' }),
-                  h('button', { type: 'button', onClick: () => updateCartItemQuantity(item.productId, item.unitId, item.quantity + 1), className: 'p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800' }, h(Plus, { className: 'w-3 h-3' }))
+                  h('button', { type: 'button', onClick: () => updateCartItemQuantity(item.productId, item.unitId, item.quantity - 1, item.cartLineId), className: 'p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800' }, h(Minus, { className: 'w-3 h-3' })),
+                  h('input', { type: 'number', step: 'any', min: '0.001', value: item.quantity, onChange: (e) => updateCartItemQuantity(item.productId, item.unitId, parseFloat(e.target.value) || 0.001, item.cartLineId), className: 'w-11 text-center text-xs font-bold font-mono bg-transparent focus:outline-none' }),
+                  h('button', { type: 'button', onClick: () => updateCartItemQuantity(item.productId, item.unitId, item.quantity + 1, item.cartLineId), className: 'p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800' }, h(Plus, { className: 'w-3 h-3' }))
                 ),
                 h('div', { className: 'text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono' }, `${lineTotal.toFixed(2)} ${settings.currencySymbol}`)
               )
@@ -142,6 +144,7 @@ export const CartPanel = ({ onOpenPayment }) => {
       ),
       h('div', { className: 'space-y-1 text-xs' },
         h('div', { className: 'flex justify-between text-slate-600 dark:text-slate-400' }, h('span', null, 'المجموع:'), h('span', { className: 'font-mono font-bold' }, `${subtotal.toFixed(2)} ${settings.currencySymbol}`)),
+        h('div', { className: 'flex justify-between font-bold text-blue-700 dark:text-blue-300' }, h('span', null, 'ربح الفاتورة (متوسط التكلفة):'), h('span', { className: `font-mono font-black ${invoiceProfit < 0 ? 'text-rose-600' : 'text-blue-700 dark:text-blue-300'}` }, `${invoiceProfit.toFixed(2)} ${settings.currencySymbol}`)),
         h('div', { className: 'flex justify-between text-base font-black pt-1 border-t border-slate-200 dark:border-slate-700' }, h('span', null, settings.scaleModeEnabled ? 'الصافي المقرب:' : 'الصافي:'), h('span', { className: 'text-emerald-600 font-mono' }, `${grandTotal.toFixed(2)} ${settings.currencySymbol}`))
       ),
       h('button', { id: 'btn-checkout', 'data-enter-primary':'true', disabled: cart.length === 0, onClick: onOpenPayment, className: 'w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-sm flex items-center justify-center gap-2 shadow-md' },
@@ -155,10 +158,10 @@ export const CartPanel = ({ onOpenPayment }) => {
     )
   );
 
-  const activeMenuItem = activeUnitDropdown ? cart.find((i)=>`${i.productId}-${i.unitId}`===activeUnitDropdown) : null;
+  const activeMenuItem = activeUnitDropdown ? cart.find((i)=>(i.cartLineId || `${i.productId}-${i.unitId}-${i.lastAddedAt || ''}`)===activeUnitDropdown) : null;
   const unitPortal = activeUnitDropdown&&unitMenuPos&&activeMenuItem&&typeof document!=='undefined' ? createPortal(
     h('div',{'data-cart-unit-menu':activeUnitDropdown,onPointerDown:(e)=>e.stopPropagation(),style:{position:'fixed',top:`${unitMenuPos.top}px`,left:`${unitMenuPos.left}px`,width:`${unitMenuPos.width}px`,zIndex:2147483000},className:'rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1.5 shadow-2xl max-h-[240px] overflow-y-auto'},
-      ...(activeMenuItem.availableUnits||[]).map((u)=>h('button',{key:u.id,type:'button',onClick:()=>{setActiveUnitDropdown(null);setUnitMenuPos(null);updateCartItemUnit(activeMenuItem.productId,activeMenuItem.unitId,u.id);},className:`w-full text-right px-3 py-2 text-xs rounded-lg flex items-center justify-between gap-3 ${u.id===activeMenuItem.unitId?'bg-emerald-600 text-white font-bold':'text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'}`},h('span',{className:'truncate'},u.name),h('span',{className:'text-[9px] opacity-80 font-mono shrink-0'},`${u.salePrice} ${settings.currencySymbol}`)))
+      ...(activeMenuItem.availableUnits||[]).map((u)=>h('button',{key:u.id,type:'button',onClick:()=>{setActiveUnitDropdown(null);setUnitMenuPos(null);updateCartItemUnit(activeMenuItem.productId,activeMenuItem.unitId,u.id,activeMenuItem.cartLineId);},className:`w-full text-right px-3 py-2 text-xs rounded-lg flex items-center justify-between gap-3 ${u.id===activeMenuItem.unitId?'bg-emerald-600 text-white font-bold':'text-slate-700 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'}`},h('span',{className:'truncate'},u.name),h('span',{className:'text-[9px] opacity-80 font-mono shrink-0'},`${u.salePrice} ${settings.currencySymbol}`)))
     ),document.body) : null;
   const customerPortal = showQuickCustomer&&typeof document!=='undefined' ? createPortal(
     h('div', { className:'fixed inset-0 p-4 flex items-center justify-center',style:{zIndex:2147483500,background:'rgba(15,23,42,.55)',backdropFilter:'blur(8px)',WebkitBackdropFilter:'blur(8px)'}, onPointerDown:(e)=>{if(e.target===e.currentTarget)setShowQuickCustomer(false);} },
